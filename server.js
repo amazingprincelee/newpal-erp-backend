@@ -1,14 +1,22 @@
 import express from "express"
-import authRoute from "./routes/authRoute.js"
+import fileUpload from "express-fileupload";
+import cors from "cors"
 import database from "./config/db.js"
+import authRoute from "./routes/authRoute.js"
+import userRoute from "./routes/userRoute.js"
 
 
 
 const app = express()
 
-
+app.use(cors())
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json())
+app.use(
+    fileUpload({
+      useTempFiles: true
+    })
+);
  
 database()
  
@@ -17,6 +25,7 @@ app.get('/', (req, res)=>{
 })
 
 app.use('/api/auth', authRoute)
+app.use('/api/users', userRoute)
 
 
 

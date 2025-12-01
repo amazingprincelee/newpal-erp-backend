@@ -4,45 +4,91 @@ import bcrypt from "bcrypt"
 import jwt from "jsonwebtoken"
 import { config } from "dotenv"
 import { generateRandomPassword } from "../utils/randomPassword.js";
+import { upload } from "../config/cloudinary.js";
 config()
 
 const JWT_SECRET = process.env.JWT_SECRET
 
 
 
-export const registerUser = async (req, res)=>{
+export const registerUser = async (req, res) => {
+    
+    console.log("I got hit o");
+    
 
-    try {
-        const {fullname, username, email, phone, address, gender, role} = req.body;
+  try {
+    const {
+      fullname,
+      username,
+      email,
+      phone,
+      address,
+      gender,
+      role,
+    } = req.body;
 
-        const user = await User.findOne({username: username});
+    // Check if user already exists
+    const existingUser = await User.findOne({
+      $or: [{ username }, { email }],
+    });
 
-        if(user){
-            res.status(400).json({message: "username already exists, please choose another username"})
-        }
-
-        const tempPassword = generateRandomPassword();
-   
-        const userData = {
-            fullname: fullname,
-            username: username,
-            email: email,
-            phone: phone,
-            address: address,
-            gender: gender,
-            tempPassword: tempPassword,
-            role: role
-        }
-
-        const newUser = User(userData)
-
-        await newUser.save();
-        
-    } catch (error) {
-        res.status(500).json({message: "Internal server error", error: error})
+    if (existingUser) {
+      return res.status(400).json({
+        message: "Username or email already exists",
+      });
     }
-        
-}
+
+    // Handle profile picture upload
+    let profilePictureUrl = null;
+    if (req.files && req.files.profilePicture) {
+      const file = req.files.profilePicture;
+
+      // Upload to Cloudinary
+      const result = await upload(file.tempFilePath, "users/profile-pictures");
+
+      profilePictureUrl = result.secure_url;
+    }
+
+    // Generate temporary password
+    const tempPassword = generateRandomPassword();
+    const hashedPassword = await bcrypt.hash(tempPassword, 10);
+
+    // Create new user
+    const newUser = new User({
+      fullname,
+      username,
+      email,
+      phone,
+      address,
+      gender,
+      role,
+      profilePicture: profilePictureUrl,
+      tempPassword: hashedPassword, // store hashed temp password
+      hasChangedPassword: false, // optional: track if user changed temp password
+    });
+
+    await newUser.save();
+
+    return res.status(201).json({
+      message: "User created successfully",
+      user: {
+        id: newUser._id,
+        fullname: newUser.fullname,
+        username: newUser.username,
+        email: newUser.email,
+        role: newUser.role,
+        profilePicture: newUser.profilePicture,
+        temporalPassword: tempPassword, // send plain temp password once
+      },
+    });
+  } catch (error) {
+    console.error("Register error:", error);
+    return res.status(500).json({
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
 
 
 export const loginUser = async (req, res) => {
