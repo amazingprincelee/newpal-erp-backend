@@ -91,24 +91,83 @@ export const registerUser = async (req, res) => {
 };
 
 
+// controllers/authController.js (or wherever your login is)
 export const loginUser = async (req, res) => {
+  try {
+    const { username, password } = req.body;
 
-    const {username, password} = req.body;
-
-
-    const user = await User.findOne({username: username});
-
-    if(!user){
-         res.status(401).json({message: "Username or Password is incorrect"})
+    if (!username || !password) {
+      return res.status(400).json({ message: "Username and password required" });
     }
 
-    const isMatched = await bcrypt.compare(password, user.password)
-
-    if(isMatched){
-        const token = jwt.sign({id: user._id, role: user.role, name: user.fullname}, JWT_SECRET, {expiresIn: 60 * 60 * 24 * 1});
-        return res.status(200).json({message: "user successfully logged in", token, role: user.role})
-    }else{
-        return res.status(401).json({message: "Username or Password is incorrect"})
+    const user = await User.findOne({ username }).select("+password +tempPassword");
+    if (!user) {
+      return res.status(401).json({ message: "Username or password is incorrect" });
     }
 
-}
+    if (!user.isActive) {
+      return res.status(401).json({ message: "Account is deactivated. Contact admin." });
+    }
+
+    // Check BOTH passwords — whichever matches wins
+    const realPasswordValid = user.password 
+      ? await bcrypt.compare(password, user.password) 
+      : false;
+
+    const tempPasswordValid = user.tempPassword 
+      ? await bcrypt.compare(password, user.tempPassword) 
+      : false;
+
+    if (!realPasswordValid && !tempPasswordValid) {
+      return res.status(401).json({ message: "Username or password is incorrect" });
+    }
+
+    // Generate token
+    const token = jwt.sign(
+      { id: user._id, role: user.role, name: user.fullname },
+      JWT_SECRET,
+      { expiresIn: "24h" }
+    );
+
+    // Optional: tell frontend which password was used (for UX)
+    const usedTempPassword = !realPasswordValid && tempPasswordValid;
+
+    res.status(200).json({
+      message: "Login successful",
+      token,
+      role: user.role,
+      user: {
+        id: user._id,
+        fullname: user.fullname,
+        username: user.username,
+        profilePicture: user.profilePicture,
+        hasRealPassword: !!user.password,           
+        usingTempPassword: usedTempPassword,        
+      }
+    });
+
+  } catch (error) {
+    console.error("Login error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+// POST /api/auth/change-password (protected route)
+export const changePassword = async (req, res) => {
+  try {
+    const { newPassword } = req.body;
+    const userId = req.user.id; // from JWT middleware
+
+    const hashed = await bcrypt.hash(newPassword, 10);
+
+    await User.findByIdAndUpdate(userId, {
+      password: hashed,
+      // tempPassword stays — they can still use it if they want!
+      // or you can delete it: tempPassword: undefined
+    });
+
+    res.json({ message: "Password updated successfully" });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to update password" });
+  }
+};
