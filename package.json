@@ -4,6 +4,8 @@
   "main": "server.js",
   "type":"module",
   "scripts": {
+    "start": "node server.js",
+    "build": "echo 'No build step required'",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "prince lee nna",
