@@ -51,7 +51,7 @@ export const registerUser = async (req, res) => {
 
     // Generate temporary password
     const tempPassword = generateRandomPassword();
-    const hashedPassword = await bcrypt.hash(tempPassword, 10);
+   
 
     // Create new user
     const newUser = new User({
@@ -63,8 +63,8 @@ export const registerUser = async (req, res) => {
       gender,
       role,
       profilePicture: profilePictureUrl,
-      tempPassword: hashedPassword, // store hashed temp password
-      hasChangedPassword: false, // optional: track if user changed temp password
+      tempPassword: tempPassword, // temp password
+      hasChangedPassword: false, 
     });
 
     await newUser.save();
@@ -91,8 +91,11 @@ export const registerUser = async (req, res) => {
 };
 
 
-// controllers/authController.js (or wherever your login is)
+// controllers/authController.js
+// controllers/authController.js
 export const loginUser = async (req, res) => {
+  console.log("Login endpoint hit");
+
   try {
     const { username, password } = req.body;
 
@@ -100,39 +103,41 @@ export const loginUser = async (req, res) => {
       return res.status(400).json({ message: "Username and password required" });
     }
 
-    const user = await User.findOne({ username }).select("+password +tempPassword");
-    if (!user) {
+    const user = await User.findOne({ username });
+    if (!user || !user.isActive) {
       return res.status(401).json({ message: "Username or password is incorrect" });
     }
 
-    if (!user.isActive) {
-      return res.status(401).json({ message: "Account is deactivated. Contact admin." });
+    console.log("User found:", user.fullname);
+    console.log("Stored tempPassword:", user.tempPassword);
+    console.log("Has real password:", !!user.password);
+
+    let isValid = false;
+    let usingTempPassword = false;
+
+    // 1. Check real (hashed) password first
+    if (user.password) {
+      isValid = await bcrypt.compare(password, user.password);
     }
 
-    // Check BOTH passwords — whichever matches wins
-    const realPasswordValid = user.password 
-      ? await bcrypt.compare(password, user.password) 
-      : false;
+    // 2. If not, check tempPassword (plain text)
+    if (!isValid && user.tempPassword === password) {
+      isValid = true;
+      usingTempPassword = true;
+    }
 
-    const tempPasswordValid = user.tempPassword 
-      ? await bcrypt.compare(password, user.tempPassword) 
-      : false;
-
-    if (!realPasswordValid && !tempPasswordValid) {
+    if (!isValid) {
       return res.status(401).json({ message: "Username or password is incorrect" });
     }
 
     // Generate token
     const token = jwt.sign(
       { id: user._id, role: user.role, name: user.fullname },
-      JWT_SECRET,
+      process.env.JWT_SECRET,
       { expiresIn: "24h" }
     );
 
-    // Optional: tell frontend which password was used (for UX)
-    const usedTempPassword = !realPasswordValid && tempPasswordValid;
-
-    res.status(200).json({
+    res.json({
       message: "Login successful",
       token,
       role: user.role,
@@ -141,33 +146,13 @@ export const loginUser = async (req, res) => {
         fullname: user.fullname,
         username: user.username,
         profilePicture: user.profilePicture,
-        hasRealPassword: !!user.password,           
-        usingTempPassword: usedTempPassword,        
-      }
+        hasRealPassword: !!user.password,
+        usingTempPassword,
+      },
     });
 
   } catch (error) {
     console.error("Login error:", error);
     res.status(500).json({ message: "Server error" });
-  }
-};
-
-// POST /api/auth/change-password (protected route)
-export const changePassword = async (req, res) => {
-  try {
-    const { newPassword } = req.body;
-    const userId = req.user.id; // from JWT middleware
-
-    const hashed = await bcrypt.hash(newPassword, 10);
-
-    await User.findByIdAndUpdate(userId, {
-      password: hashed,
-      // tempPassword stays — they can still use it if they want!
-      // or you can delete it: tempPassword: undefined
-    });
-
-    res.json({ message: "Password updated successfully" });
-  } catch (error) {
-    res.status(500).json({ message: "Failed to update password" });
   }
 };
