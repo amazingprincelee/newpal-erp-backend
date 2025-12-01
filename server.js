@@ -1,8 +1,7 @@
 import express from "express"
 import authRoute from "./routes/authRoute.js"
 import database from "./config/db.js"
-import { config } from "dotenv"
-config()
+
 
 
 const app = express()

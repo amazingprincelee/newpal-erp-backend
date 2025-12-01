@@ -1,6 +1,11 @@
 import mongoose from 'mongoose';
+import { config } from "dotenv"
+config()
 
 const isMongoDbCloudConnection = true;
+
+
+
 
 
 const connectDB = async () => {
@@ -10,6 +15,7 @@ const connectDB = async () => {
 
       const mongoDb = await mongoose.connect(process.env.MONGO_URI );
       console.log(`📦 MongoDB Connected: ${mongoDb.connection.host}`);
+     
 
     }else{
       await mongoose.connect(process.env.LOCAL_URL);
