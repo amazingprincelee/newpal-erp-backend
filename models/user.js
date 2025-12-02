@@ -9,6 +9,7 @@ const userSchema = new mongoose.Schema({
     phone: {type: String, required: true},
     password: {type: String, default: null},
     tempPassword: {type: String, required: true},
+    hasChangedPassword: {type: Boolean, default: false},
     address: {type: String, required: true},
     gender: {type: String, enum: ["female", "male", "other"]},
     role: {

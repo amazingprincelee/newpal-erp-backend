@@ -116,3 +116,60 @@ export const resetUserPassword = async (req, res) => {
     res.status(500).json({ message: "Reset failed" });
   }
 };
+
+
+// CHANGE password (User changes from temporal to permanent password)
+export const changePassword = async (req, res) => {
+  try {
+    const userId = req.user.id; // From authenticate middleware
+    const { currentPassword, newPassword } = req.body;
+
+    // Validation
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ message: "Current password and new password are required" });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: "New password must be at least 6 characters long" });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Verify current password (check both tempPassword and password)
+    let isCurrentPasswordValid = false;
+
+    // If user hasn't changed password yet, verify against tempPassword
+    if (!user.hasChangedPassword && user.tempPassword) {
+      isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.tempPassword);
+    } 
+    // If user has changed password, verify against main password
+    else if (user.password) {
+      isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password);
+    }
+
+    if (!isCurrentPasswordValid) {
+      return res.status(401).json({ message: "Current password is incorrect" });
+    }
+
+    // Hash new password
+    const hashedNewPassword = await bcrypt.hash(newPassword, 10);
+
+    // Update user
+    user.password = hashedNewPassword;
+    user.hasChangedPassword = true;
+    user.tempPassword = null; // Clear temporary password
+    user.temporalPassword = null; // Clear plain text temporal password
+    await user.save();
+
+    res.json({ 
+      message: "Password changed successfully",
+      hasChangedPassword: true 
+    });
+  } catch (error) {
+    console.error("Change password error:", error);
+    res.status(500).json({ message: "Failed to change password" });
+  }
+};

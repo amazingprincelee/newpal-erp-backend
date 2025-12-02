@@ -63,8 +63,7 @@ export const registerUser = async (req, res) => {
       gender,
       role,
       profilePicture: profilePictureUrl,
-      tempPassword: tempPassword, // temp password
-      hasChangedPassword: false, 
+      tempPassword: tempPassword, // temp password 
     });
 
     await newUser.save();
