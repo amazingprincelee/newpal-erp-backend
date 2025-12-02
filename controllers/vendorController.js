@@ -1,15 +1,67 @@
 // controllers/vendorController.js
 import Vendor from '../models/vendor.js';
+import { upload } from '../config/cloudinary.js';
 
 export const createVendor = async (req, res) => {
   try {
-    const vendor = new Vendor({
-      ...req.body,
+    // Parse JSON fields from FormData
+    const vendorData = {
+      companyName: req.body.companyName,
+      tradingName: req.body.tradingName,
+      typeOfBusiness: req.body.typeOfBusiness,
+      yearEstablished: req.body.yearEstablished,
+      rcNumber: req.body.rcNumber,
+      tin: req.body.tin,
+      registeredAddress: req.body.registeredAddress,
+      factoryAddress: req.body.factoryAddress,
+      contactPerson: req.body.contactPerson,
+      position: req.body.position,
+      phone: req.body.phone,
+      email: req.body.email,
+      website: req.body.website,
       status: 'Pending'
-    });
+    };
+
+    // Parse nested JSON objects
+    if (req.body.supplyCategories) {
+      vendorData.supplyCategories = JSON.parse(req.body.supplyCategories);
+    }
+    if (req.body.bankDetails) {
+      vendorData.bankDetails = JSON.parse(req.body.bankDetails);
+    }
+    if (req.body.qualitySafety) {
+      vendorData.qualitySafety = JSON.parse(req.body.qualitySafety);
+    }
+
+    // Handle file uploads
+    if (req.files && req.files.documents) {
+      const uploadedFiles = Array.isArray(req.files.documents) 
+        ? req.files.documents 
+        : [req.files.documents];
+
+      const documentFields = req.body.documentFields 
+        ? JSON.parse(req.body.documentFields) 
+        : [];
+
+      vendorData.documents = {};
+
+      for (let i = 0; i < uploadedFiles.length; i++) {
+        const file = uploadedFiles[i];
+        const fieldName = documentFields[i];
+        
+        if (file && fieldName) {
+          const result = await upload(file.tempFilePath, 'vendors/documents');
+          vendorData.documents[fieldName] = result.secure_url;
+        }
+      }
+    }
+
+    const vendor = new Vendor(vendorData);
     await vendor.save();
+    
     res.status(201).json({ success: true, data: vendor });
   } catch (error) {
+    console.error('Create vendor error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -18,11 +70,12 @@ export const approveVendor = async (req, res) => {
   try {
     const vendor = await Vendor.findById(req.params.id);
     if (!vendor) return res.status(404).json({ success: false, message: 'Vendor not found' });
-
+    
     vendor.status = 'Approved';
     vendor.approvedBy = req.user.id;
     vendor.approvedAt = new Date();
     await vendor.save();
+    
     res.json({ success: true, message: 'Vendor approved', data: vendor });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -38,41 +91,66 @@ export const getVendors = async (req, res) => {
   }
 };
 
-
-// EDIT / UPDATE VENDOR
 export const updateVendor = async (req, res) => {
   try {
     const { id } = req.params;
-
-    // Find the vendor
+    
     const vendor = await Vendor.findById(id);
     if (!vendor) {
       return res.status(404).json({ success: false, message: 'Vendor not found' });
     }
 
-    // OPTIONAL: Only allow editing if status is Pending or Under Review
-    // (Remove or adjust this block depending on your business rule)
-    if (!['Pending', 'Under Review'].includes(vendor.status)) {
-      return res
-        .status(400)
-        .json({ success: false, message: `Cannot edit vendor with status "${vendor.status}"` });
-    }
-
-    // Prevent changing the status via this endpoint (admin uses approve/reject separately)
-    if (req.body.status) {
-      return res
-        .status(400)
-        .json({ success: false, message: 'Use dedicated approve/reject endpoints to change status' });
-    }
-
-    // If new files are uploaded, req.body will contain the new URLs (handled by your multer/cloudinary middleware)
+    // Parse JSON fields from FormData
     const updatedData = {
-      ...req.body,
-      // Keep the original submittedAt date (or reset if you want)
-      // submittedAt remains untouched
+      companyName: req.body.companyName,
+      tradingName: req.body.tradingName,
+      typeOfBusiness: req.body.typeOfBusiness,
+      yearEstablished: req.body.yearEstablished,
+      rcNumber: req.body.rcNumber,
+      tin: req.body.tin,
+      registeredAddress: req.body.registeredAddress,
+      factoryAddress: req.body.factoryAddress,
+      contactPerson: req.body.contactPerson,
+      position: req.body.position,
+      phone: req.body.phone,
+      email: req.body.email,
+      website: req.body.website,
     };
 
-    // Merge with existing data (so empty fields don't overwrite with undefined)
+    // Parse nested JSON objects
+    if (req.body.supplyCategories) {
+      updatedData.supplyCategories = JSON.parse(req.body.supplyCategories);
+    }
+    if (req.body.bankDetails) {
+      updatedData.bankDetails = JSON.parse(req.body.bankDetails);
+    }
+    if (req.body.qualitySafety) {
+      updatedData.qualitySafety = JSON.parse(req.body.qualitySafety);
+    }
+
+    // Handle file uploads
+    if (req.files && req.files.documents) {
+      const uploadedFiles = Array.isArray(req.files.documents) 
+        ? req.files.documents 
+        : [req.files.documents];
+
+      const documentFields = req.body.documentFields 
+        ? JSON.parse(req.body.documentFields) 
+        : [];
+
+      updatedData.documents = { ...vendor.documents };
+
+      for (let i = 0; i < uploadedFiles.length; i++) {
+        const file = uploadedFiles[i];
+        const fieldName = documentFields[i];
+        
+        if (file && fieldName) {
+          const result = await upload(file.tempFilePath, 'vendors/documents');
+          updatedData.documents[fieldName] = result.secure_url;
+        }
+      }
+    }
+
     const updatedVendor = await Vendor.findByIdAndUpdate(
       id,
       { $set: updatedData },
@@ -90,7 +168,6 @@ export const updateVendor = async (req, res) => {
   }
 };
 
-// DELETE VENDOR
 export const deleteVendor = async (req, res) => {
   try {
     const vendor = await Vendor.findById(req.params.id);
