@@ -102,8 +102,8 @@ export const resetUserPassword = async (req, res) => {
     const newTempPassword = generateRandomPassword();
     const hashed = await bcrypt.hash(newTempPassword, 10);
 
-    user.tempPassword = hashed;
-    user.temporalPassword = newTempPassword; // Store plain text for admin to see
+    user.password = hashed;
+    user.tempPassword = newTempPassword; // Store plain text for admin to see
     user.hasChangedPassword = false;
     await user.save();
 
