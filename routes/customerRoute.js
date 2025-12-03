@@ -1,33 +1,36 @@
+// routes/customerRoutes.js
 import express from "express";
 import {
   createCustomer,
   approveCustomer,
   getCustomers,
-  getCustomerById,
   updateCustomer,
-  deleteCustomer
+  deleteCustomer,
+  assignSalesRep,
 } from "../controllers/customerController.js";
 
-import { authenticate } from "../middlewares/authMiddleware.js";
+import {authenticate } from "../middlewares/authMiddleware.js"
+import { isAdmin } from "../middlewares/authRoles.js"
+// Adjust middleware import based on your setup
 
 const router = express.Router();
 
-// CREATE customer (public or protected? add authenticate if needed)
+// 📌 Create new customer (with file upload support)
 router.post("/", authenticate, createCustomer);
 
-// GET all customers
+// 📌 Get all customers
 router.get("/", authenticate, getCustomers);
 
-// GET single customer by ID
-router.get("/:id", authenticate, getCustomerById);
+// 📌 Approve a customer (Admin only)
+router.put("/approve/:id", authenticate, isAdmin, approveCustomer);
 
-// UPDATE customer
+// 📌 Update customer & upload new files if available
 router.put("/:id", authenticate, updateCustomer);
 
-// DELETE customer
-router.delete("/:id", authenticate, deleteCustomer);
+// 📌 Delete a customer
+router.delete("/:id", authenticate, isAdmin, deleteCustomer);
 
-// APPROVE customer (only authenticated admin should approve)
-router.put("/approve/:id", authenticate, approveCustomer);
+// 📌 Assign Sales Rep
+router.put("/assign-sales-rep", authenticate, isAdmin, assignSalesRep);
 
 export default router;

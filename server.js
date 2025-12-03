@@ -5,6 +5,7 @@ import database from "./config/db.js"
 import authRoute from "./routes/authRoute.js"
 import userRoute from "./routes/userRoute.js"
 import vendorRoute from "./routes/vendorRoute.js"
+import customerRoute from "./routes/customerRoute.js"
 
 
 
@@ -28,6 +29,7 @@ app.get('/', (req, res)=>{
 app.use('/api/auth', authRoute)
 app.use('/api/users', userRoute)
 app.use('/api/vendors', vendorRoute)
+app.use('/api/customers', customerRoute)
 
 
 

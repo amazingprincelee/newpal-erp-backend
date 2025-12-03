@@ -105,12 +105,6 @@ const customerSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Indexes for fast search & dashboard
-customerSchema.index({ companyName: 'text', tradingName: 'text', tin: 'text' });
-customerSchema.index({ status: 1 });
-customerSchema.index({ monthlyVolume: 1 });
-customerSchema.index({ 'businessCategory': 1 });
-customerSchema.index({ 'productsInterested': 1 });
-customerSchema.index({ assignedSalesRep: 1 });
 
-export default mongoose.model('Customer', customerSchema);
+const Customer = mongoose.model('Customer', customerSchema);
+export default Customer
