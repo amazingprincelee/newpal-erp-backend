@@ -42,7 +42,7 @@ const incomingShipmentSchema = new mongoose.Schema({
     odor: { type: String, enum: ['Normal', 'Musty', 'Foul'] },
     notes: String,
     images: [String],               // photos of grains
-    status: { type: String, enum: ['PASSED', 'FAILED', 'SENT_TO_LAB'], default: 'PENDING' },
+    status: { type: String, enum: ['PASSED', 'FAILED', 'SENT_TO_LAB', 'PENDING'], default: 'PENDING' },
     sendToLab: { type: Boolean, default: false }
   },
 

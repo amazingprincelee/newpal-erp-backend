@@ -21,8 +21,8 @@ const outgoingShipmentSchema = new mongoose.Schema({
     totalWeight: { type: Number }
   }],
 
-  totalBags: { type: Number, required: true },
-  totalWeight: { type: Number, required: true },
+  totalBags: { type: Number,  },
+  totalWeight: { type: Number, },
   destination: { type: String, required: true },
 
   // === MD APPROVAL ===
