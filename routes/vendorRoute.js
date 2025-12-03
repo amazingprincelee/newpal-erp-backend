@@ -1,7 +1,7 @@
 // routes/vendorRoutes.js
 import express from 'express';
 import { authenticate } from '../middlewares/authMiddleware.js';
-import { isAdmin, isSuperAdmin, isProcurement } from '../middlewares/authRoles.js';
+import { isAdmin, isSuperAdmin, isAdminOrProcurement } from '../middlewares/authRoles.js';
 import {
   createVendor,
   approveVendor,
@@ -13,7 +13,7 @@ import {
 const router = express.Router();
 
 // CREATE VENDOR - Procurement can create
-router.post('/', authenticate, isAdmin, isProcurement, createVendor);
+router.post('/', authenticate, isAdmin, isAdminOrProcurement, createVendor);
 
 // GET ALL VENDORS - All authenticated users can view
 router.get('/', authenticate, getVendors);

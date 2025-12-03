@@ -28,3 +28,20 @@ export const isProcurement = (req, res, next) => {
     }
     next();
 };
+
+// Allow Admin OR SuperAdmin OR Procurement
+export const isAdminOrProcurement = (req, res, next) => {
+  if (!req.user) {
+    return res.status(403).json({ message: "Access denied: Authentication required" });
+  }
+  
+  const allowedRoles = ['admin', 'super-admin', 'procurement'];
+  
+  if (!allowedRoles.includes(req.user.role)) {
+    return res.status(403).json({ 
+      message: "Access denied: Admin, Super Admin, or Procurement role required" 
+    });
+  }
+  
+  next();
+}
