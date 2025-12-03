@@ -6,6 +6,10 @@ import authRoute from "./routes/authRoute.js"
 import userRoute from "./routes/userRoute.js"
 import vendorRoute from "./routes/vendorRoute.js"
 import customerRoute from "./routes/customerRoute.js"
+import incomingShipmentRoute from "./routes/incomingShipmentRoute.js"
+import outgoingShipmentRoute from "./routes/outgoingShipmentRoute.js"
+import visitorEntryRoute from "./routes/visitorEntryRoute.js"
+
 
 
 
@@ -30,6 +34,9 @@ app.use('/api/auth', authRoute)
 app.use('/api/users', userRoute)
 app.use('/api/vendors', vendorRoute)
 app.use('/api/customers', customerRoute)
+app.use('/api/incoming-shipments', incomingShipmentRoute)
+app.use('/api/outgoing-shipments', outgoingShipmentRoute)
+app.use('/api/visitor-entries', visitorEntryRoute)
 
 
 
