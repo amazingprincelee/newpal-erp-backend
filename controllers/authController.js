@@ -91,8 +91,9 @@ export const registerUser = async (req, res) => {
 
 
 
-
 export const loginUser = async (req, res) => {
+  console.log("Login endpoint hit");
+
   try {
     const { username, password } = req.body;
 
@@ -105,27 +106,30 @@ export const loginUser = async (req, res) => {
       return res.status(401).json({ message: "Username or password is incorrect" });
     }
 
-    let passwordMatches = false;
+    console.log("User found:", user.fullname);
+    console.log("Stored tempPassword:", user.tempPassword);
+    console.log("Has real password:", !!user.password);
+
+    let isValid = false;
     let usingTempPassword = false;
 
-    // 👉 LOGIN IF real hashed password matches...
-    if (user.password && await bcrypt.compare(password, user.password)) {
-      passwordMatches = true;
-    }
-    // 👉 ...OR IF temp password matches
-    else if (password === user.tempPassword) {
-      passwordMatches = true;
-      usingTempPassword = true;
+    // 1. Check real (hashed) password first
+    if (user.password) {
+      isValid = await bcrypt.compare(password, user.password);
     }
 
-    // If nothing matched → login error
-    if (!passwordMatches) {
+    if (password === user.tempPassword){
+      isValid = true
+      usingTempPassword = true; 
+    }
+
+    if (!isValid) {
       return res.status(401).json({ message: "Username or password is incorrect" });
     }
 
-    // Create token
+    // Generate token
     const token = jwt.sign(
-      { id: user._id, role: user.role },
+      { id: user._id, role: user.role, name: user.fullname },
       process.env.JWT_SECRET,
       { expiresIn: "24h" }
     );
@@ -133,12 +137,15 @@ export const loginUser = async (req, res) => {
     res.json({
       message: "Login successful",
       token,
+      role: user.role,
       user: {
         id: user._id,
         fullname: user.fullname,
         username: user.username,
+        profilePicture: user.profilePicture,
+        hasRealPassword: !!user.password,
         usingTempPassword,
-      }
+      },
     });
 
   } catch (error) {
