@@ -90,11 +90,9 @@ export const registerUser = async (req, res) => {
 };
 
 
-// controllers/authController.js
-// controllers/authController.js
-export const loginUser = async (req, res) => {
-  console.log("Login endpoint hit");
 
+
+export const loginUser = async (req, res) => {
   try {
     const { username, password } = req.body;
 
@@ -103,35 +101,31 @@ export const loginUser = async (req, res) => {
     }
 
     const user = await User.findOne({ username });
-    if (!user || !user.isActive) {
+    if (!user) {
       return res.status(401).json({ message: "Username or password is incorrect" });
     }
 
-    console.log("User found:", user.fullname);
-    console.log("Stored tempPassword:", user.tempPassword);
-    console.log("Has real password:", !!user.password);
-
-    let isValid = false;
+    let passwordMatches = false;
     let usingTempPassword = false;
 
-    // 1. Check real (hashed) password first
-    if (user.password) {
-      isValid = await bcrypt.compare(password, user.password);
+    // 👉 LOGIN IF real hashed password matches...
+    if (user.password && await bcrypt.compare(password, user.password)) {
+      passwordMatches = true;
     }
-
-    // 2. If not, check tempPassword (plain text)
-    if (!isValid && user.tempPassword === password) {
-      isValid = true;
+    // 👉 ...OR IF temp password matches
+    else if (password === user.tempPassword) {
+      passwordMatches = true;
       usingTempPassword = true;
     }
 
-    if (!isValid) {
+    // If nothing matched → login error
+    if (!passwordMatches) {
       return res.status(401).json({ message: "Username or password is incorrect" });
     }
 
-    // Generate token
+    // Create token
     const token = jwt.sign(
-      { id: user._id, role: user.role, name: user.fullname },
+      { id: user._id, role: user.role },
       process.env.JWT_SECRET,
       { expiresIn: "24h" }
     );
@@ -139,15 +133,12 @@ export const loginUser = async (req, res) => {
     res.json({
       message: "Login successful",
       token,
-      role: user.role,
       user: {
         id: user._id,
         fullname: user.fullname,
         username: user.username,
-        profilePicture: user.profilePicture,
-        hasRealPassword: !!user.password,
         usingTempPassword,
-      },
+      }
     });
 
   } catch (error) {
