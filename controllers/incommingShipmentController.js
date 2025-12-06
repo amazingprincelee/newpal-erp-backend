@@ -112,14 +112,17 @@ export const getIncomingShipments = async (req, res) => {
 // Get single incoming shipment
 export const getIncomingShipmentById = async (req, res) => {
   try {
-    const shipment = await IncomingShipment.findById(req.params.id)
-      .populate('gateEntry.vendor', 'companyName contactPerson phone email')
-      .populate('gateEntry.enteredBy', 'name email')
-      .populate('qualityControl.inspectedBy', 'name email')
-      .populate('labAnalysis.analyzedBy', 'name email')
-      .populate('weighbridge.weighedBy', 'name email')
-      .populate('adminApproval.approvedBy adminApproval.rejectedBy', 'name email')
-      .populate('offloading.offloadedBy', 'name email');
+   const shipments = await IncomingShipment.find(filter)
+  .populate('gateEntry.vendor', 'companyName contactPerson phone')
+  .populate('gateEntry.enteredBy', 'fullname username email')
+  .populate('gateEntry.securityCountedBy', 'fullname username role')  // ← ADD THIS
+  .populate('qualityControl.inspectedBy', 'fullname username email')
+  .populate('labAnalysis.analyzedBy', 'fullname username email')
+  .populate('weighbridge.weighedBy', 'fullname username email')
+  .populate('adminApproval.approvedBy adminApproval.rejectedBy', 'fullname username email')
+  .populate('offloading.offloadedBy', 'fullname username email')
+  .sort({ createdAt: -1 })
+  .limit(parseInt(limit));
 
     if (!shipment) {
       return res.status(404).json({ success: false, message: 'Shipment not found' });
@@ -143,15 +146,24 @@ export const updateSecurityCount = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Shipment not found' });
     }
 
+    // Update security count with user information
     shipment.gateEntry.securityBagCount = Number(securityBagCount);
+    shipment.gateEntry.securityCountedBy = req.user?.id || req.user?._id;  // ← ADDED: Record who counted
+    shipment.gateEntry.securityCountedAt = new Date();  // ← ADDED: Record when counted
     shipment.gateEntry.bagCountMatch = Number(securityBagCount) === shipment.gateEntry.declaredBags;
     shipment.currentStatus = 'SECURITY_COUNTED';
     
     await shipment.save();
 
+    // Populate the security officer details for response
+    await shipment.populate('gateEntry.securityCountedBy', 'fullname username role');
+    await shipment.populate('gateEntry.vendor', 'companyName contactPerson phone');
+
+    console.log(`✅ Security count updated by ${req.user?.fullname || req.user?.username}`);
+
     res.json({
       success: true,
-      message: 'Security count updated successfully',
+      message: 'Security count recorded successfully',
       data: shipment
     });
   } catch (error) {
@@ -159,7 +171,6 @@ export const updateSecurityCount = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
-
 // Update QC inspection
 export const updateQCInspection = async (req, res) => {
   try {

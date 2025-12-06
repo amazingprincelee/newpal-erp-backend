@@ -25,7 +25,8 @@ const incomingShipmentSchema = new mongoose.Schema({
     declaredBags: { type: Number, required: true, min: 1 },
     productType: { type: String, required: true }, // e.g., "Yellow Maize"
     origin: { type: String, required: true },
-    securityBagCount: { type: Number },           // ← Security man counts at gate
+    securityBagCount: { type: Number }, 
+    securityCountedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },          
     bagCountMatch: { type: Boolean },             // ← Does it match declared?
     notes: String
   },

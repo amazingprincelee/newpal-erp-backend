@@ -93,6 +93,7 @@ export const registerUser = async (req, res) => {
 
 export const loginUser = async (req, res) => {
   console.log("Login endpoint hit");
+  console.log("Login endpoint hit again");
 
   try {
     const { username, password } = req.body;
