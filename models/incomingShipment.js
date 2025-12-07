@@ -73,7 +73,8 @@ const incomingShipmentSchema = new mongoose.Schema({
     discrepancyBags: Number,
     discrepancyPercent: Number,
     notes: String,
-    ticketUrl: String
+    ticketUrl: String,
+    OperatorSignature: String
   },
 
   // === MD / ADMIN APPROVAL (Final Gatekeeper) ===

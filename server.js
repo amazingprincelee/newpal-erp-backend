@@ -10,6 +10,9 @@ import incomingShipmentRoute from "./routes/incomingShipmentRoute.js"
 import outgoingShipmentRoute from "./routes/outgoingShipmentRoute.js"
 import visitorEntryRoute from "./routes/visitorEntryRoute.js"
 import statsRoute from "./routes/statsRoutes.js"
+import weighbridgeRoute from "./routes/weighbridgeRoute.js"
+import qcRoute from "./routes/qcRoute.js"
+import labRoute from "./routes/labRoute.js"
 
 
 
@@ -39,6 +42,9 @@ app.use('/api/incoming-shipments', incomingShipmentRoute)
 app.use('/api/outgoing-shipments', outgoingShipmentRoute)
 app.use('/api/visitor-entries', visitorEntryRoute)
 app.use('/api/stats', statsRoute)
+app.use('/api/weighbridge', weighbridgeRoute)
+app.use('/api/qc', qcRoute)
+app.use('/api/lab', labRoute)
 
 
 
