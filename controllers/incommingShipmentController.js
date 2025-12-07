@@ -54,6 +54,7 @@ export const createIncomingShipment = async (req, res) => {
         productType,
         origin,
         securityBagCount: securityBagCount ? Number(securityBagCount) : null,
+        securityCountedBy: securityBagCount ? (req.user?.id || req.user?._id) : null,
         bagCountMatch: securityBagCount ? Number(securityBagCount) === Number(declaredBags) : null,
         notes
       },
@@ -65,12 +66,17 @@ export const createIncomingShipment = async (req, res) => {
 
     // Populate vendor info
     await shipment.populate('gateEntry.vendor', 'companyName contactPerson phone');
-    await shipment.populate('gateEntry.enteredBy', 'name email');
+    await shipment.populate('gateEntry.enteredBy', 'fullname username email');
+    if (securityBagCount) {
+      await shipment.populate('gateEntry.securityCountedBy', 'fullname username role');
+    }
 
     console.log('✅ Incoming shipment created:', shipment._id);
     res.status(201).json({
       success: true,
-      message: 'Shipment entry created and sent to QC',
+      message: securityBagCount 
+        ? 'Shipment entry created with security count' 
+        : 'Shipment entry created and sent to Security',
       data: shipment
     });
   } catch (error) {
@@ -93,12 +99,13 @@ export const getIncomingShipments = async (req, res) => {
 
     const shipments = await IncomingShipment.find(filter)
       .populate('gateEntry.vendor', 'companyName contactPerson phone')
-      .populate('gateEntry.enteredBy', 'name email')
-      .populate('qualityControl.inspectedBy', 'name email')
-      .populate('labAnalysis.analyzedBy', 'name email')
-      .populate('weighbridge.weighedBy', 'name email')
-      .populate('adminApproval.approvedBy adminApproval.rejectedBy', 'name email')
-      .populate('offloading.offloadedBy', 'name email')
+      .populate('gateEntry.enteredBy', 'fullname username email')
+      .populate('gateEntry.securityCountedBy', 'fullname username role')
+      .populate('qualityControl.inspectedBy', 'fullname username email')
+      .populate('labAnalysis.analyzedBy', 'fullname username email')
+      .populate('weighbridge.weighedBy', 'fullname username email')
+      .populate('adminApproval.approvedBy adminApproval.rejectedBy', 'fullname username email')
+      .populate('offloading.offloadedBy', 'fullname username email')
       .sort({ createdAt: -1 })
       .limit(parseInt(limit));
 
@@ -112,17 +119,15 @@ export const getIncomingShipments = async (req, res) => {
 // Get single incoming shipment
 export const getIncomingShipmentById = async (req, res) => {
   try {
-   const shipments = await IncomingShipment.find(filter)
-  .populate('gateEntry.vendor', 'companyName contactPerson phone')
-  .populate('gateEntry.enteredBy', 'fullname username email')
-  .populate('gateEntry.securityCountedBy', 'fullname username role')  // ← ADD THIS
-  .populate('qualityControl.inspectedBy', 'fullname username email')
-  .populate('labAnalysis.analyzedBy', 'fullname username email')
-  .populate('weighbridge.weighedBy', 'fullname username email')
-  .populate('adminApproval.approvedBy adminApproval.rejectedBy', 'fullname username email')
-  .populate('offloading.offloadedBy', 'fullname username email')
-  .sort({ createdAt: -1 })
-  .limit(parseInt(limit));
+    const shipment = await IncomingShipment.findById(req.params.id)
+      .populate('gateEntry.vendor', 'companyName contactPerson phone')
+      .populate('gateEntry.enteredBy', 'fullname username email')
+      .populate('gateEntry.securityCountedBy', 'fullname username role')
+      .populate('qualityControl.inspectedBy', 'fullname username email')
+      .populate('labAnalysis.analyzedBy', 'fullname username email')
+      .populate('weighbridge.weighedBy', 'fullname username email')
+      .populate('adminApproval.approvedBy adminApproval.rejectedBy', 'fullname username email')
+      .populate('offloading.offloadedBy', 'fullname username email');
 
     if (!shipment) {
       return res.status(404).json({ success: false, message: 'Shipment not found' });
@@ -135,7 +140,7 @@ export const getIncomingShipmentById = async (req, res) => {
   }
 };
 
-// Update security bag count
+// Update security bag count - 🔥 AUTO-SEND TO QC AFTER COUNT
 export const updateSecurityCount = async (req, res) => {
   try {
     const { id } = req.params;
@@ -146,24 +151,35 @@ export const updateSecurityCount = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Shipment not found' });
     }
 
+    // Validate security bag count
+    if (!securityBagCount || securityBagCount <= 0) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Valid security bag count is required' 
+      });
+    }
+
     // Update security count with user information
     shipment.gateEntry.securityBagCount = Number(securityBagCount);
-    shipment.gateEntry.securityCountedBy = req.user?.id || req.user?._id;  // ← ADDED: Record who counted
-    shipment.gateEntry.securityCountedAt = new Date();  // ← ADDED: Record when counted
+    shipment.gateEntry.securityCountedBy = req.user?.id || req.user?._id;
     shipment.gateEntry.bagCountMatch = Number(securityBagCount) === shipment.gateEntry.declaredBags;
-    shipment.currentStatus = 'SECURITY_COUNTED';
+    
+    // 🔥 AUTOMATICALLY SEND TO QC AFTER SECURITY COUNT
+    shipment.currentStatus = 'IN_QC';
     
     await shipment.save();
 
-    // Populate the security officer details for response
+    // Populate all relevant fields
     await shipment.populate('gateEntry.securityCountedBy', 'fullname username role');
     await shipment.populate('gateEntry.vendor', 'companyName contactPerson phone');
+    await shipment.populate('gateEntry.enteredBy', 'fullname username email');
 
     console.log(`✅ Security count updated by ${req.user?.fullname || req.user?.username}`);
+    console.log(`✅ Shipment ${shipment.shipmentNumber} automatically sent to QC`);
 
     res.json({
       success: true,
-      message: 'Security count recorded successfully',
+      message: 'Security count recorded and shipment sent to QC',
       data: shipment
     });
   } catch (error) {
@@ -171,6 +187,7 @@ export const updateSecurityCount = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
 // Update QC inspection
 export const updateQCInspection = async (req, res) => {
   try {
@@ -180,6 +197,14 @@ export const updateQCInspection = async (req, res) => {
     const shipment = await IncomingShipment.findById(id);
     if (!shipment) {
       return res.status(404).json({ success: false, message: 'Shipment not found' });
+    }
+
+    // Ensure shipment is in QC stage
+    if (shipment.currentStatus !== 'IN_QC') {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Shipment must be in QC stage for inspection' 
+      });
     }
 
     shipment.qualityControl = {
@@ -194,11 +219,19 @@ export const updateQCInspection = async (req, res) => {
       shipment.qualityControl.status = 'SENT_TO_LAB';
     } else if (qcData.status === 'PASSED') {
       shipment.currentStatus = 'AT_WEIGHBRIDGE';
-    } else {
+      shipment.qualityControl.status = 'PASSED';
+    } else if (qcData.status === 'FAILED') {
       shipment.currentStatus = 'REJECTED';
+      shipment.qualityControl.status = 'FAILED';
     }
 
     await shipment.save();
+
+    // Populate for response
+    await shipment.populate('qualityControl.inspectedBy', 'fullname username email');
+    await shipment.populate('gateEntry.vendor', 'companyName contactPerson phone');
+
+    console.log(`✅ QC inspection completed for ${shipment.shipmentNumber}: ${shipment.qualityControl.status}`);
 
     res.json({
       success: true,
@@ -222,6 +255,14 @@ export const updateLabAnalysis = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Shipment not found' });
     }
 
+    // Ensure shipment is in LAB stage
+    if (shipment.currentStatus !== 'IN_LAB') {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Shipment must be in LAB stage for analysis' 
+      });
+    }
+
     shipment.labAnalysis = {
       ...labData,
       analyzedBy: req.user?.id || req.user?._id,
@@ -236,6 +277,11 @@ export const updateLabAnalysis = async (req, res) => {
     }
 
     await shipment.save();
+
+    await shipment.populate('labAnalysis.analyzedBy', 'fullname username email');
+    await shipment.populate('gateEntry.vendor', 'companyName contactPerson phone');
+
+    console.log(`✅ Lab analysis completed for ${shipment.shipmentNumber}: ${labData.status}`);
 
     res.json({
       success: true,
@@ -259,6 +305,14 @@ export const updateWeighbridge = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Shipment not found' });
     }
 
+    // Ensure shipment is at weighbridge stage
+    if (shipment.currentStatus !== 'AT_WEIGHBRIDGE') {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Shipment must be at weighbridge stage' 
+      });
+    }
+
     shipment.weighbridge = {
       weighedBy: req.user?.id || req.user?._id,
       weighedAt: new Date(),
@@ -271,6 +325,13 @@ export const updateWeighbridge = async (req, res) => {
     shipment.adminApproval.requestedAt = new Date();
 
     await shipment.save();
+
+    await shipment.populate('weighbridge.weighedBy', 'fullname username email');
+    await shipment.populate('gateEntry.vendor', 'companyName contactPerson phone');
+
+    console.log(`✅ Weighbridge data recorded for ${shipment.shipmentNumber}`);
+    console.log(`   Net Weight: ${shipment.weighbridge.netWeight} kg`);
+    console.log(`   Calculated Bags: ${shipment.weighbridge.calculatedBags}`);
 
     res.json({
       success: true,
@@ -294,6 +355,14 @@ export const updateMDApproval = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Shipment not found' });
     }
 
+    // Ensure shipment is pending approval
+    if (shipment.currentStatus !== 'PENDING_MD_APPROVAL') {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Shipment must be pending approval' 
+      });
+    }
+
     if (status === 'APPROVED') {
       shipment.adminApproval.status = 'APPROVED';
       shipment.adminApproval.approvedBy = req.user?.id || req.user?._id;
@@ -309,6 +378,11 @@ export const updateMDApproval = async (req, res) => {
     }
 
     await shipment.save();
+
+    await shipment.populate('adminApproval.approvedBy adminApproval.rejectedBy', 'fullname username email');
+    await shipment.populate('gateEntry.vendor', 'companyName contactPerson phone');
+
+    console.log(`✅ Shipment ${shipment.shipmentNumber} ${status.toLowerCase()} by MD`);
 
     res.json({
       success: true,
@@ -332,6 +406,14 @@ export const updateOffloading = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Shipment not found' });
     }
 
+    // Ensure shipment is approved
+    if (shipment.currentStatus !== 'APPROVED' && shipment.currentStatus !== 'OFFLOADING') {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Shipment must be approved before offloading' 
+      });
+    }
+
     shipment.offloading = {
       ...offloadingData,
       offloadedBy: req.user?.id || req.user?._id,
@@ -340,11 +422,17 @@ export const updateOffloading = async (req, res) => {
 
     if (offloadingData.completed) {
       shipment.currentStatus = 'COMPLETED';
+      shipment.offloading.completed = true;
     } else {
       shipment.currentStatus = 'OFFLOADING';
     }
 
     await shipment.save();
+
+    await shipment.populate('offloading.offloadedBy', 'fullname username email');
+    await shipment.populate('gateEntry.vendor', 'companyName contactPerson phone');
+
+    console.log(`✅ Offloading updated for ${shipment.shipmentNumber}`);
 
     res.json({
       success: true,
@@ -367,6 +455,8 @@ export const deleteIncomingShipment = async (req, res) => {
 
     await IncomingShipment.findByIdAndDelete(req.params.id);
 
+    console.log(`✅ Shipment ${shipment.shipmentNumber} deleted`);
+
     res.json({
       success: true,
       message: 'Shipment deleted successfully'
@@ -386,21 +476,25 @@ export const getIncomingStats = async (req, res) => {
     const [
       totalToday,
       atGate,
+      securityCounted,
       inQC,
       inLab,
       atWeighbridge,
       pendingApproval,
       approved,
-      offloading
+      offloading,
+      completed
     ] = await Promise.all([
       IncomingShipment.countDocuments({ createdAt: { $gte: today } }),
-      IncomingShipment.countDocuments({ currentStatus: { $in: ['AT_GATE', 'SECURITY_COUNTED'] } }),
+      IncomingShipment.countDocuments({ currentStatus: 'AT_GATE' }),
+      IncomingShipment.countDocuments({ currentStatus: 'SECURITY_COUNTED' }),
       IncomingShipment.countDocuments({ currentStatus: 'IN_QC' }),
       IncomingShipment.countDocuments({ currentStatus: 'IN_LAB' }),
       IncomingShipment.countDocuments({ currentStatus: 'AT_WEIGHBRIDGE' }),
       IncomingShipment.countDocuments({ currentStatus: 'PENDING_MD_APPROVAL' }),
       IncomingShipment.countDocuments({ currentStatus: 'APPROVED' }),
-      IncomingShipment.countDocuments({ currentStatus: 'OFFLOADING' })
+      IncomingShipment.countDocuments({ currentStatus: 'OFFLOADING' }),
+      IncomingShipment.countDocuments({ currentStatus: 'COMPLETED' })
     ]);
 
     res.json({
@@ -408,12 +502,14 @@ export const getIncomingStats = async (req, res) => {
       data: {
         totalToday,
         atGate,
+        securityCounted,
         inQC,
         inLab,
         atWeighbridge,
         pendingApproval,
         approved,
-        offloading
+        offloading,
+        completed
       }
     });
   } catch (error) {

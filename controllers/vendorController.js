@@ -26,6 +26,11 @@ export const createVendor = async (req, res) => {
       status: 'Pending'
     };
 
+    console.log('Parsed Vendor Data being saved to DB:');
+console.table(vendorData);  // This gives a beautiful table in console
+
+console.log('================================================');
+
     // Parse nested JSON objects
     if (req.body.supplyCategories) {
       vendorData.supplyCategories = JSON.parse(req.body.supplyCategories);

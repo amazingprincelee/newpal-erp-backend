@@ -13,7 +13,7 @@ import {
 const router = express.Router();
 
 // CREATE VENDOR - Procurement can create
-router.post('/', authenticate, isAdmin, isAdminOrProcurement, createVendor);
+router.post('/', authenticate, isAdminOrProcurement, createVendor);
 
 // GET ALL VENDORS - All authenticated users can view
 router.get('/', authenticate, getVendors);
