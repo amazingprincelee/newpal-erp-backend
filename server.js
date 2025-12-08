@@ -13,6 +13,7 @@ import statsRoute from "./routes/statsRoutes.js"
 import weighbridgeRoute from "./routes/weighbridgeRoute.js"
 import qcRoute from "./routes/qcRoute.js"
 import labRoute from "./routes/labRoute.js"
+import adminApprovalRoute from "./routes/adminApprovalRoute.js"
 
 
 
@@ -45,6 +46,8 @@ app.use('/api/stats', statsRoute)
 app.use('/api/weighbridge', weighbridgeRoute)
 app.use('/api/qc', qcRoute)
 app.use('/api/lab', labRoute)
+app.use('/api/admin-approval', adminApprovalRoute)
+
 
 
 
