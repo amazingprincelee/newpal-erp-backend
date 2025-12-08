@@ -14,6 +14,7 @@ import weighbridgeRoute from "./routes/weighbridgeRoute.js"
 import qcRoute from "./routes/qcRoute.js"
 import labRoute from "./routes/labRoute.js"
 import adminApprovalRoute from "./routes/adminApprovalRoute.js"
+import offloadingRoute from "./routes/offloadingRoute.js"
 
 
 
@@ -47,6 +48,8 @@ app.use('/api/weighbridge', weighbridgeRoute)
 app.use('/api/qc', qcRoute)
 app.use('/api/lab', labRoute)
 app.use('/api/admin-approval', adminApprovalRoute)
+app.use('/api/offloading', offloadingRoute)
+
 
 
 
