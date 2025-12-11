@@ -13,7 +13,7 @@ const JWT_SECRET = process.env.JWT_SECRET
 
 export const registerUser = async (req, res) => {
     
-    console.log("I got hit o");
+   
     
 
   try {

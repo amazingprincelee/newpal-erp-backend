@@ -8,8 +8,8 @@ let isMailerReady = false;
 
 export const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST,
-  port: 587,
-  secure: false,
+  port: 465,
+  secure: true,
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASSWORD,
@@ -20,7 +20,7 @@ export const transporter = nodemailer.createTransport({
      }
 });
 
-console.log("Node-mailer log for email_user", process.env.EMAIL_USER );
+
 
 
 
@@ -52,7 +52,7 @@ export async function safeSendMail(mailOptions) {
   }
 }
 
-export async function sendPassword(to, password, username) {
+export async function sendPassword(to, password, username, ) {
   // Fetch company info (logo, etc.)
   let company = await CompanyInfo.findOne();
   const logo = company?.logo || "https://via.placeholder.com/150?text=Logo";
