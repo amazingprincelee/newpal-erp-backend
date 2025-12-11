@@ -62,7 +62,7 @@ export async function sendPassword(to, password, username) {
   const mailOption = {
     from: '"Newpal Admin" <noreply@newpalfoods.com>',
     to,
-    subject: "Your Newpal Admin Account Login Credentials",
+    subject: "Your Newpal ERP Account Login Credentials",
 
     html: `
       <div style="font-family: Arial, sans-serif; background:#ffffff; padding:20px;">
@@ -76,7 +76,7 @@ export async function sendPassword(to, password, username) {
 
         <p>Hello,</p>
 
-        <p>Your admin account on <strong>Newpal</strong> has been successfully created.</p>
+        <p>Your ERP account on <strong>Newpal</strong> has been successfully created.</p>
 
         <h3 style="margin-bottom: 8px; color:${primaryColor};">Your Login Details:</h3>
 
