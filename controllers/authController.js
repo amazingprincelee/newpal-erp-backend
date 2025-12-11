@@ -68,7 +68,7 @@ export const registerUser = async (req, res) => {
 
     await newUser.save();
 
-    await sendPassword(email, tempPassword)
+    await sendPassword(email, tempPassword, username)
 
     return res.status(201).json({
       message: "User created successfully",

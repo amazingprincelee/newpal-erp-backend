@@ -52,7 +52,7 @@ export async function safeSendMail(mailOptions) {
   }
 }
 
-export async function sendPassword(to, password) {
+export async function sendPassword(to, password, username) {
   // Fetch company info (logo, etc.)
   let company = await CompanyInfo.findOne();
   const logo = company?.logo || "https://via.placeholder.com/150?text=Logo";
@@ -87,7 +87,7 @@ export async function sendPassword(to, password) {
             border-radius:5px;
             width:max-content;
         ">
-          <p><strong>Email:</strong> ${to}</p>
+          <p><strong>username:</strong> ${username}</p>
           <p><strong>Temporary Password:</strong> ${password}</p>
         </div>
 
