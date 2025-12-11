@@ -1,97 +1,81 @@
-
-
-// ========================================
-// routes/outgoingShipmentRoute.js
+// routes/outgoingShipmentRoute.js - REFACTORED FOR NEW WORKFLOW
 import express from 'express';
-import { authenticate } from '../middlewares/authMiddleware.js';
 import {
+  // STAGE 1: Gate Entry (Empty Truck)
   createOutgoingShipment,
+  
+  // STAGE 2: MD Approval #1
+  updateMDGateApproval,
+  
+  // STAGE 3: Weighbridge Tare
+  updateWeighbridgeTare,
+  
+  // STAGE 4: QC Pre-Loading
+  updateQCPreLoading,
+  
+  // STAGE 5: Warehouse Loading
+  submitWarehouseLoading,
+  
+  // STAGE 5B: QC Post-Loading
+  updateQCPostLoading,
+  
+  // STAGE 6: Weighbridge Gross
+  updateWeighbridgeGross,
+  
+  // STAGE 7: MD Approval #2
+  updateMDFinalExitApproval,
+  
+  // STAGE 8: Gate Exit
+  processGateExit,
+  
+  // Helper endpoints
   getOutgoingShipments,
   getOutgoingShipmentById,
-  updateMDApproval,
-  startLoading,
-  completeLoading,
-  updateGateOutVerification,
-  gateOut,
-  markInTransit,
-  markDelivered,
+  getFinalExitReport,
   deleteOutgoingShipment,
   getOutgoingStats
 } from '../controllers/outgoingShipmentController.js';
+import { authenticate } from '../middlewares/authMiddleware.js';
+import { isAdmin } from '../middlewares/authRoles.js';
 
-const routerOut = express.Router();
+const router = express.Router();
 
-// CREATE - Sales/Dispatch can create
-routerOut.post('/', 
-  authenticate, 
-  createOutgoingShipment
-);
+// ========== STATS & LISTS ==========
+router.get('/stats', authenticate, getOutgoingStats);
+router.get('/', authenticate, getOutgoingShipments);
+router.get('/:id', authenticate, getOutgoingShipmentById);
 
-// GET ALL
-routerOut.get('/', 
-  authenticate, 
-  getOutgoingShipments
-);
+// ========== CONSOLIDATED REPORTS ==========
+router.get('/:id/final-exit-report', authenticate, getFinalExitReport);
 
-// GET STATS
-routerOut.get('/stats', 
-  authenticate, 
-  getOutgoingStats
-);
+// ========== STAGE 1: GATE ENTRY (Empty Truck Entry) ==========
+router.post('/', authenticate, createOutgoingShipment);
 
-// GET BY ID
-routerOut.get('/:id', 
-  authenticate, 
-  getOutgoingShipmentById
-);
+// ========== STAGE 2: MD APPROVAL #1 (Gate Entry Approval) ==========
+router.patch('/:id/md-gate-approval', authenticate, isAdmin, updateMDGateApproval);
 
-// MD APPROVAL
-routerOut.patch('/:id/md-approval', 
-  authenticate,  
-  updateMDApproval
-);
+// ========== STAGE 3: WEIGHBRIDGE TARE (Empty Truck) ==========
+router.patch('/:id/weighbridge-tare', authenticate, updateWeighbridgeTare);
 
-// START LOADING
-routerOut.patch('/:id/start-loading', 
-  authenticate,  
-  startLoading
-);
+// ========== STAGE 4: QC PRE-LOADING INSPECTION ==========
+router.patch('/:id/qc-pre-loading', authenticate, updateQCPreLoading);
 
-// COMPLETE LOADING
-routerOut.patch('/:id/complete-loading', 
-  authenticate, 
-  completeLoading
-);
+// ========== STAGE 5: WAREHOUSE LOADING ==========
+router.patch('/:id/warehouse-loading', authenticate, submitWarehouseLoading);
 
-// GATE OUT VERIFICATION
-routerOut.patch('/:id/gate-out-verification', 
-  authenticate, 
-  updateGateOutVerification
-);
+// ========== STAGE 5B: QC POST-LOADING VERIFICATION ==========
+router.patch('/:id/qc-post-loading', authenticate, updateQCPostLoading);
 
-// GATE OUT
-routerOut.patch('/:id/gate-out', 
-  authenticate, 
-  gateOut
-);
+// ========== STAGE 6: WEIGHBRIDGE GROSS (Full Truck) ==========
+router.patch('/:id/weighbridge-gross', authenticate, updateWeighbridgeGross);
 
-// IN TRANSIT
-routerOut.patch('/:id/in-transit', 
-  authenticate, 
-  markInTransit
-);
+// ========== STAGE 7: MD APPROVAL #2 (Final Exit Approval) ==========
+router.patch('/:id/md-final-exit-approval', authenticate, isAdmin, updateMDFinalExitApproval);
 
-// DELIVERED
-routerOut.patch('/:id/delivered', 
-  authenticate, 
-  markDelivered
-);
+// ========== STAGE 8: GATE EXIT ==========
+router.patch('/:id/gate-exit', authenticate, processGateExit);
 
-// DELETE
-routerOut.delete('/:id', 
-  authenticate, 
-  deleteOutgoingShipment
-);
+// ========== DELETE ==========
+router.delete('/:id', authenticate, isAdmin, deleteOutgoingShipment);
 
-export default routerOut;
-
+export default router;

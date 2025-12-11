@@ -1,15 +1,16 @@
-// routes/offloadingRoute.js
+// routes/offloadingRoute.js - UPDATED FOR 3 DEPARTMENT REPORTS
 import express from 'express';
 import { authenticate } from '../middlewares/authMiddleware.js';
 
 import {
   getShipmentsReadyForOffloading,
   getShipmentsInOffloading,
-  getShipmentsPendingApproval,
   startOffloading,
-  completeOffloading,
-  getCompletedShipments,
-  getOffloadingStatistics
+  submitQCStockKeeperReport,
+  submitWarehouseReport,
+  submitSecurityReport,
+  getOffloadingStatistics,
+  getShipmentsAwaitingTareWeight
 } from '../controllers/offloadingController.js';
 
 const router = express.Router();
@@ -17,41 +18,16 @@ const router = express.Router();
 // All routes require authentication
 router.use(authenticate);
 
-// GET routes - accessible by warehouse/inventory staff
-router.get('/ready', 
-  
-  getShipmentsReadyForOffloading
-);
+// GET routes
+router.get('/ready', getShipmentsReadyForOffloading);
+router.get('/in-progress', getShipmentsInOffloading);
+router.get('/awaiting-tare', getShipmentsAwaitingTareWeight);
+router.get('/statistics', getOffloadingStatistics);
 
-router.get('/in-progress', 
-  
-  getShipmentsInOffloading
-);
-
-router.get('/pending-approval', 
-  
-  getShipmentsPendingApproval
-);
-
-router.get('/completed', 
-   
-  getCompletedShipments
-);
-
-router.get('/statistics', 
-  
-  getOffloadingStatistics
-);
-
-// POST routes - start and complete offloading
-router.post('/:id/start', 
-  
-  startOffloading
-);
-
-router.post('/:id/complete', 
-  
-  completeOffloading
-);
+// POST routes
+router.post('/:id/start', startOffloading);
+router.post('/:id/qc-stock-keeper', submitQCStockKeeperReport);
+router.post('/:id/warehouse', submitWarehouseReport);
+router.post('/:id/security', submitSecurityReport);
 
 export default router;

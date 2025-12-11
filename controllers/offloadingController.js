@@ -1,17 +1,18 @@
-// controllers/offloadingController.js
+// controllers/offloadingController.js - UPDATED FOR 3 DEPARTMENT REPORTS
 import IncomingShipment from '../models/incomingShipment.js';
 
-// Get all shipments ready for offloading (MD Approved)
+// ========== GET SHIPMENTS READY FOR OFFLOADING ==========
+// These are shipments that got MD Approval #2 (Pre-Offload Approval)
 export const getShipmentsReadyForOffloading = async (req, res) => {
   try {
     const shipments = await IncomingShipment.find({
-      currentStatus: 'APPROVED'
+      currentStatus: 'APPROVED_FOR_OFFLOAD'
     })
-    .populate('gateEntry.vendor', 'companyName contactPerson phone')
-    .populate('gateEntry.enteredBy', 'fullname username')
-    .populate('weighbridge.weighedBy', 'fullname username')
-    .populate('adminApproval.approvedBy', 'fullname username')
-    .sort({ 'adminApproval.approvedAt': 1 });  // First approved, first offloaded
+    .populate('gateEntry.vendor', 'name contactPerson phone')
+    .populate('gateEntry.enteredBy', 'name')
+    .populate('weighbridge.grossWeighedBy', 'name')
+    .populate('mdApprovals.preOffloadApproval.reviewedBy', 'name')
+    .sort({ 'mdApprovals.preOffloadApproval.reviewedAt': 1 }); // FIFO
 
     console.log(`✅ Found ${shipments.length} shipments ready for offloading`);
 
@@ -30,15 +31,17 @@ export const getShipmentsReadyForOffloading = async (req, res) => {
   }
 };
 
-// Get shipments currently being offloaded
+// ========== GET SHIPMENTS IN OFFLOADING ==========
 export const getShipmentsInOffloading = async (req, res) => {
   try {
     const shipments = await IncomingShipment.find({
-      currentStatus: 'OFFLOADING'
+      currentStatus: 'OFFLOADING_IN_PROGRESS'
     })
-    .populate('gateEntry.vendor', 'companyName contactPerson phone')
-    .populate('offloading.offloadedBy', 'fullname username')
-    .sort({ 'offloading.startTime': 1 });
+    .populate('gateEntry.vendor', 'name contactPerson phone')
+    .populate('offloadReports.qcStockKeeperReport.submittedBy', 'name')
+    .populate('offloadReports.warehouseReport.submittedBy', 'name')
+    .populate('offloadReports.securityReport.submittedBy', 'name')
+    .sort({ updatedAt: 1 });
 
     console.log(`✅ Found ${shipments.length} shipments in offloading`);
 
@@ -57,34 +60,7 @@ export const getShipmentsInOffloading = async (req, res) => {
   }
 };
 
-// Get shipments pending MD approval (for display)
-export const getShipmentsPendingApproval = async (req, res) => {
-  try {
-    const shipments = await IncomingShipment.find({
-      currentStatus: 'PENDING_MD_APPROVAL'
-    })
-    .populate('gateEntry.vendor', 'companyName contactPerson phone')
-    .populate('weighbridge.weighedBy', 'fullname username')
-    .sort({ 'weighbridge.weighedAt': 1 });
-
-    console.log(`✅ Found ${shipments.length} shipments pending MD approval`);
-
-    res.status(200).json({
-      success: true,
-      count: shipments.length,
-      data: shipments
-    });
-  } catch (error) {
-    console.error('❌ Error fetching pending shipments:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching pending shipments',
-      error: error.message
-    });
-  }
-};
-
-// Start offloading process
+// ========== START OFFLOADING PROCESS ==========
 export const startOffloading = async (req, res) => {
   try {
     const { id } = req.params;
@@ -98,30 +74,26 @@ export const startOffloading = async (req, res) => {
       });
     }
 
-    if (shipment.currentStatus !== 'APPROVED') {
+    if (shipment.currentStatus !== 'APPROVED_FOR_OFFLOAD') {
       return res.status(400).json({
         success: false,
-        message: `Shipment is not ready for offloading. Current status: ${shipment.currentStatus}`
+        message: `Shipment not approved for offload. Current status: ${shipment.currentStatus}`
       });
     }
 
     // Update to offloading status
-    shipment.currentStatus = 'OFFLOADING';
-    shipment.offloading.offloadedBy = req.user?.id || req.user?._id;
-    shipment.offloading.startTime = new Date();
-
+    shipment.currentStatus = 'OFFLOADING_IN_PROGRESS';
     await shipment.save();
 
-    // Populate for response
-    await shipment.populate('offloading.offloadedBy', 'fullname username email');
-    await shipment.populate('gateEntry.vendor', 'companyName contactPerson');
+    const updatedShipment = await IncomingShipment.findById(id)
+      .populate('gateEntry.vendor', 'name contactPerson');
 
     console.log(`✅ Started offloading for shipment ${shipment.shipmentNumber}`);
 
     res.status(200).json({
       success: true,
-      message: 'Offloading process started',
-      data: shipment
+      message: 'Offloading process started. Awaiting 3 department reports.',
+      data: updatedShipment
     });
   } catch (error) {
     console.error('❌ Error starting offloading:', error);
@@ -133,25 +105,21 @@ export const startOffloading = async (req, res) => {
   }
 };
 
-// Complete offloading process
-export const completeOffloading = async (req, res) => {
+// ========== SUBMIT QC & STOCK KEEPER REPORT ==========
+export const submitQCStockKeeperReport = async (req, res) => {
   try {
     const { id } = req.params;
     const {
-      actualBagsCounted,
-      storageLocation,
-      condition,
-      damageReport,
-      notes
+      numberOfSampleBags,
+      numberOfRejectedBags,
+      numberOfAcceptedBags,
+      totalBagsAcceptedIntoInventory,
+      visualQualityIssues,
+      insectsFound,
+      pictures,
+      qcOfficerSignature,
+      stockKeeperSignature
     } = req.body;
-
-    // Validate required fields
-    if (!actualBagsCounted || !storageLocation || !condition) {
-      return res.status(400).json({
-        success: false,
-        message: 'Missing required fields: actualBagsCounted, storageLocation, condition'
-      });
-    }
 
     const shipment = await IncomingShipment.findById(id);
 
@@ -162,89 +130,223 @@ export const completeOffloading = async (req, res) => {
       });
     }
 
-    if (shipment.currentStatus !== 'OFFLOADING') {
+    if (shipment.currentStatus !== 'OFFLOADING_IN_PROGRESS') {
       return res.status(400).json({
         success: false,
-        message: `Shipment is not in offloading status. Current status: ${shipment.currentStatus}`
+        message: 'Shipment is not in offloading status'
       });
     }
 
-    // Update offloading details
-    shipment.offloading.endTime = new Date();
-    shipment.offloading.actualBagsCounted = Number(actualBagsCounted);
-    shipment.offloading.storageLocation = storageLocation;
-    shipment.offloading.condition = condition;
-    shipment.offloading.damageReport = damageReport || '';
-    shipment.offloading.notes = notes || '';
-    shipment.offloading.completed = true;
-    shipment.offloading.inventoryUpdated = true;  // Mark as ready for inventory update
-    
-    // Update status to completed
-    shipment.currentStatus = 'COMPLETED';
+    // Update QC & Stock Keeper report
+    shipment.offloadReports.qcStockKeeperReport = {
+      submittedBy: req.user?.id || req.user?._id,
+      submittedAt: new Date(),
+      numberOfSampleBags: Number(numberOfSampleBags),
+      numberOfRejectedBags: Number(numberOfRejectedBags),
+      numberOfAcceptedBags: Number(numberOfAcceptedBags),
+      totalBagsAcceptedIntoInventory: Number(totalBagsAcceptedIntoInventory),
+      visualQualityIssues: visualQualityIssues || '',
+      insectsFound: insectsFound || { noneFound: true },
+      pictures: pictures || [],
+      qcOfficer: {
+        userId: req.user?.id || req.user?._id,
+        signature: qcOfficerSignature,
+        signedAt: new Date()
+      },
+      stockKeeper: {
+        userId: req.user?.id || req.user?._id, // Should be different user ideally
+        signature: stockKeeperSignature,
+        signedAt: new Date()
+      },
+      completed: true
+    };
+
+    // Check if all 3 reports are complete
+    await checkAndCompleteOffloading(shipment);
 
     await shipment.save();
 
-    // Populate for response
-    await shipment.populate('offloading.offloadedBy', 'fullname username email');
-    await shipment.populate('gateEntry.vendor', 'companyName contactPerson');
+    const updatedShipment = await IncomingShipment.findById(id)
+      .populate('offloadReports.qcStockKeeperReport.submittedBy', 'name');
 
-    // Calculate offloading duration
-    const duration = Math.round(
-      (shipment.offloading.endTime - shipment.offloading.startTime) / 1000 / 60
-    ); // in minutes
-
-    console.log(`✅ Completed offloading for shipment ${shipment.shipmentNumber}`);
-    console.log(`   Duration: ${duration} minutes`);
-    console.log(`   Actual bags counted: ${actualBagsCounted}`);
-    console.log(`   Storage location: ${storageLocation}`);
+    console.log(`✅ QC & Stock Keeper report submitted for ${shipment.shipmentNumber}`);
 
     res.status(200).json({
       success: true,
-      message: 'Offloading completed successfully',
-      data: shipment,
-      offloadingDuration: duration
+      message: 'QC & Stock Keeper report submitted successfully',
+      data: updatedShipment
     });
   } catch (error) {
-    console.error('❌ Error completing offloading:', error);
+    console.error('❌ Error submitting QC & Stock Keeper report:', error);
     res.status(500).json({
       success: false,
-      message: 'Error completing offloading',
+      message: 'Error submitting report',
       error: error.message
     });
   }
 };
 
-// Get completed shipments (for history/records)
-export const getCompletedShipments = async (req, res) => {
+// ========== SUBMIT WAREHOUSE REPORT ==========
+export const submitWarehouseReport = async (req, res) => {
   try {
-    const limit = parseInt(req.query.limit) || 50;
+    const { id } = req.params;
+    const {
+      storageLocation,
+      conditionDuringOffload,
+      additionalNotes,
+      pictures,
+      warehouseStaffSignature
+    } = req.body;
 
-    const shipments = await IncomingShipment.find({
-      currentStatus: 'COMPLETED'
-    })
-    .populate('gateEntry.vendor', 'companyName contactPerson phone')
-    .populate('offloading.offloadedBy', 'fullname username')
-    .sort({ 'offloading.offloadedAt': -1 })
-    .limit(limit);
+    const shipment = await IncomingShipment.findById(id);
 
-    console.log(`✅ Retrieved ${shipments.length} completed shipments`);
+    if (!shipment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Shipment not found'
+      });
+    }
+
+    if (shipment.currentStatus !== 'OFFLOADING_IN_PROGRESS') {
+      return res.status(400).json({
+        success: false,
+        message: 'Shipment is not in offloading status'
+      });
+    }
+
+    // Update Warehouse report
+    shipment.offloadReports.warehouseReport = {
+      submittedBy: req.user?.id || req.user?._id,
+      submittedAt: new Date(),
+      storageLocation,
+      conditionDuringOffload,
+      additionalNotes: additionalNotes || '',
+      pictures: pictures || [],
+      warehouseStaff: {
+        userId: req.user?.id || req.user?._id,
+        signature: warehouseStaffSignature,
+        signedAt: new Date()
+      },
+      completed: true
+    };
+
+    // Check if all 3 reports are complete
+    await checkAndCompleteOffloading(shipment);
+
+    await shipment.save();
+
+    const updatedShipment = await IncomingShipment.findById(id)
+      .populate('offloadReports.warehouseReport.submittedBy', 'name');
+
+    console.log(`✅ Warehouse report submitted for ${shipment.shipmentNumber}`);
 
     res.status(200).json({
       success: true,
-      count: shipments.length,
-      data: shipments
+      message: 'Warehouse report submitted successfully',
+      data: updatedShipment
     });
   } catch (error) {
-    console.error('❌ Error fetching completed shipments:', error);
+    console.error('❌ Error submitting warehouse report:', error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching completed shipments',
+      message: 'Error submitting report',
       error: error.message
     });
   }
 };
 
-// Get offloading statistics
+// ========== SUBMIT SECURITY REPORT ==========
+export const submitSecurityReport = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      totalBagsInTruck,
+      totalBagsRejected,
+      totalBagsAccepted,
+      bagCountVerified,
+      discrepancyObserved,
+      discrepancyDescription,
+      additionalNotes,
+      pictures,
+      securityOfficerBadgeNumber,
+      securityOfficerSignature
+    } = req.body;
+
+    const shipment = await IncomingShipment.findById(id);
+
+    if (!shipment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Shipment not found'
+      });
+    }
+
+    if (shipment.currentStatus !== 'OFFLOADING_IN_PROGRESS') {
+      return res.status(400).json({
+        success: false,
+        message: 'Shipment is not in offloading status'
+      });
+    }
+
+    // Update Security report
+    shipment.offloadReports.securityReport = {
+      submittedBy: req.user?.id || req.user?._id,
+      submittedAt: new Date(),
+      totalBagsInTruck: Number(totalBagsInTruck),
+      totalBagsRejected: Number(totalBagsRejected),
+      totalBagsAccepted: Number(totalBagsAccepted),
+      bagCountVerified: bagCountVerified || false,
+      discrepancyObserved: discrepancyObserved || false,
+      discrepancyDescription: discrepancyDescription || '',
+      additionalNotes: additionalNotes || '',
+      pictures: pictures || [],
+      securityOfficer: {
+        userId: req.user?.id || req.user?._id,
+        badgeNumber: securityOfficerBadgeNumber,
+        signature: securityOfficerSignature,
+        signedAt: new Date()
+      },
+      completed: true
+    };
+
+    // Check if all 3 reports are complete
+    await checkAndCompleteOffloading(shipment);
+
+    await shipment.save();
+
+    const updatedShipment = await IncomingShipment.findById(id)
+      .populate('offloadReports.securityReport.submittedBy', 'name');
+
+    console.log(`✅ Security report submitted for ${shipment.shipmentNumber}`);
+
+    res.status(200).json({
+      success: true,
+      message: 'Security report submitted successfully',
+      data: updatedShipment
+    });
+  } catch (error) {
+    console.error('❌ Error submitting security report:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error submitting report',
+      error: error.message
+    });
+  }
+};
+
+// ========== HELPER: CHECK IF ALL REPORTS COMPLETE ==========
+async function checkAndCompleteOffloading(shipment) {
+  const qcComplete = shipment.offloadReports?.qcStockKeeperReport?.completed || false;
+  const warehouseComplete = shipment.offloadReports?.warehouseReport?.completed || false;
+  const securityComplete = shipment.offloadReports?.securityReport?.completed || false;
+
+  if (qcComplete && warehouseComplete && securityComplete) {
+    shipment.currentStatus = 'OFFLOADING_COMPLETE';
+    console.log(`✅ All 3 reports complete for ${shipment.shipmentNumber} - Status: OFFLOADING_COMPLETE`);
+  }
+}
+
+// ========== GET OFFLOADING STATISTICS ==========
 export const getOffloadingStatistics = async (req, res) => {
   try {
     const today = new Date();
@@ -254,29 +356,29 @@ export const getOffloadingStatistics = async (req, res) => {
       readyForOffload,
       currentlyOffloading,
       completedToday,
-      pendingApproval
+      awaitingTareWeight
     ] = await Promise.all([
-      IncomingShipment.countDocuments({ currentStatus: 'APPROVED' }),
-      IncomingShipment.countDocuments({ currentStatus: 'OFFLOADING' }),
+      IncomingShipment.countDocuments({ currentStatus: 'APPROVED_FOR_OFFLOAD' }),
+      IncomingShipment.countDocuments({ currentStatus: 'OFFLOADING_IN_PROGRESS' }),
       IncomingShipment.countDocuments({
-        currentStatus: 'COMPLETED',
-        'offloading.offloadedAt': { $gte: today }
+        currentStatus: 'OFFLOADING_COMPLETE',
+        'offloadReports.securityReport.submittedAt': { $gte: today }
       }),
-      IncomingShipment.countDocuments({ currentStatus: 'PENDING_MD_APPROVAL' })
+      IncomingShipment.countDocuments({ currentStatus: 'OFFLOADING_COMPLETE' })
     ]);
 
     // Get total bags offloaded today
     const todayOffloaded = await IncomingShipment.aggregate([
       {
         $match: {
-          currentStatus: 'COMPLETED',
-          'offloading.offloadedAt': { $gte: today }
+          currentStatus: 'OFFLOADING_COMPLETE',
+          'offloadReports.securityReport.submittedAt': { $gte: today }
         }
       },
       {
         $group: {
           _id: null,
-          totalBags: { $sum: '$offloading.actualBagsCounted' }
+          totalBags: { $sum: '$offloadReports.securityReport.totalBagsAccepted' }
         }
       }
     ]);
@@ -291,7 +393,7 @@ export const getOffloadingStatistics = async (req, res) => {
         readyForOffload,
         currentlyOffloading,
         completedToday,
-        pendingApproval,
+        awaitingTareWeight,
         totalBagsOffloadedToday
       }
     });
@@ -300,6 +402,35 @@ export const getOffloadingStatistics = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error fetching statistics',
+      error: error.message
+    });
+  }
+};
+
+// ========== GET SHIPMENTS AWAITING TARE WEIGHT ==========
+// After offloading complete, they go to weighbridge for tare weight
+export const getShipmentsAwaitingTareWeight = async (req, res) => {
+  try {
+    const shipments = await IncomingShipment.find({
+      currentStatus: 'OFFLOADING_COMPLETE'
+    })
+    .populate('gateEntry.vendor', 'name contactPerson phone')
+    .populate('weighbridge.grossWeighedBy', 'name')
+    .populate('offloadReports.securityReport.submittedBy', 'name')
+    .sort({ 'offloadReports.securityReport.submittedAt': 1 });
+
+    console.log(`✅ Found ${shipments.length} shipments awaiting tare weight`);
+
+    res.status(200).json({
+      success: true,
+      count: shipments.length,
+      data: shipments
+    });
+  } catch (error) {
+    console.error('❌ Error fetching shipments awaiting tare:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching shipments',
       error: error.message
     });
   }

@@ -1,5 +1,5 @@
 import User from "../models/user.js";
-
+import { sendPassword } from "../utils/node-mailer.js"
 import bcrypt from "bcrypt"
 import jwt from "jsonwebtoken"
 import { config } from "dotenv"
@@ -63,10 +63,12 @@ export const registerUser = async (req, res) => {
       gender,
       role,
       profilePicture: profilePictureUrl,
-      tempPassword: tempPassword, // temp password 
+      tempPassword: tempPassword, 
     });
 
     await newUser.save();
+
+    await sendPassword(email, tempPassword)
 
     return res.status(201).json({
       message: "User created successfully",

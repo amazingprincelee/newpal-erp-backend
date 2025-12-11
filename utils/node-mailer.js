@@ -1,19 +1,29 @@
 import { config } from "dotenv";
 import nodemailer from "nodemailer";
+import CompanyInfo from "../models/companyInformation.js";
 
 config();
 
 let isMailerReady = false;
 
 export const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
+  host: process.env.EMAIL_HOST,
   port: 587,
   secure: false,
   auth: {
-    user: process.env.NODEMAILER_USER,
-    pass: process.env.NODEMAILER_PASS,
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASSWORD,
   },
+   tls: {
+       // do not fail on invalid certs
+       rejectUnauthorized: false
+     }
 });
+
+console.log("Node-mailer log for email_user", process.env.EMAIL_USER );
+
+
+
 
 // Verify transporter once at startup
 transporter.verify((err, success) => {
@@ -42,51 +52,54 @@ export async function safeSendMail(mailOptions) {
   }
 }
 
-export function sendPassword(to, password) {
+export async function sendPassword(to, password) {
+  // Fetch company info (logo, etc.)
+  let company = await CompanyInfo.findOne();
+  const logo = company?.logo || "https://via.placeholder.com/150?text=Logo";
+
+  const primaryColor = "#800000";
+
   const mailOption = {
-    from: '"Newpal Admin" <noreply@new-pal.com>',
+    from: '"Newpal Admin" <noreply@newpalfoods.com>',
     to,
     subject: "Your Newpal Admin Account Login Credentials",
 
-    text: `
-Hello,
-
-Your admin account on Newpal has been successfully created.
-
-Below are your login credentials:
-
-Email: ${to}
-Temporary Password: ${password}
-
-For security reasons, please log in immediately and change your password.
-
-If you did not expect this email, please contact the system administrator.
-
-Regards,
-Newpal Team
-    `,
-
     html: `
-      <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #930909ff;">
-        <h2 style="color:#2c3e50;">Newpal Admin Account Created</h2>
+      <div style="font-family: Arial, sans-serif; background:#ffffff; padding:20px;">
+
+        <!-- Logo Section -->
+        <div style="text-align:center; border-bottom: 3px solid ${primaryColor}; padding-bottom:15px; margin-bottom:20px;">
+          <img src="${logo}" alt="Company Logo" style="height:70px; object-fit:contain;" />
+        </div>
+
+        <h2 style="color:${primaryColor}; margin-top:0;">Newpal Admin Account Created</h2>
 
         <p>Hello,</p>
 
         <p>Your admin account on <strong>Newpal</strong> has been successfully created.</p>
 
-        <h3 style="margin-bottom: 5px;">Your Login Details:</h3>
-        <div style="background:#f4f4f4; padding:10px; border-radius:5px; width: fit-content;">
+        <h3 style="margin-bottom: 8px; color:${primaryColor};">Your Login Details:</h3>
+
+        <div style="
+            background:#f8f8f8;
+            padding:12px;
+            border-left:4px solid ${primaryColor};
+            border-radius:5px;
+            width:max-content;
+        ">
           <p><strong>Email:</strong> ${to}</p>
           <p><strong>Temporary Password:</strong> ${password}</p>
         </div>
 
-        <p style="margin-top: 20px;">
-          For security reasons, please <strong>log in immediately and update your password.</strong>
+        <p style="margin-top:20px;">
+          For security reasons, please <strong>log in immediately and change your password.</strong>
         </p>
 
-        <p>If you did not request or expect this account, kindly contact the system administrator.</p>
+        <p>If you did not request this account, kindly contact the system administrator.</p>
 
-        <p style="margin-top: 20px;">Regards,<br><strong>Newpal Team</strong></p>
+        <br>
+
+        <p style="color:${primaryColor}; font-weight:bold;">Newpal Team</p>
       </div>
     `,
   };

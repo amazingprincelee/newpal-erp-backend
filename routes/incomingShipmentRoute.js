@@ -1,15 +1,43 @@
-// routes/incomingShipmentRoute.js
+// routes/incomingShipmentRoute.js - REFACTORED FOR NEW WORKFLOW
 import express from 'express';
 import {
+  // STAGE 1: Gate Entry
   createIncomingShipment,
+  
+  // STAGE 2: MD Approval #1
+  updateMDGateApproval,
+  
+  // STAGE 3: QC Inspection
+  updateQCInspection,
+  
+  // STAGE 4: Lab Analysis
+  updateLabAnalysis,
+  
+  // STAGE 5: Weighbridge Gross
+  updateWeighbridgeGross,
+  
+  // STAGE 6: MD Approval #2
+  updateMDPreOffloadApproval,
+  
+  // STAGE 7: Offload Reports (3 departments)
+  submitQCStockKeeperReport,
+  submitWarehouseReport,
+  submitSecurityReport,
+  
+  // STAGE 8: Weighbridge Tare
+  updateWeighbridgeTare,
+  
+  // STAGE 9: MD Approval #3
+  updateMDFinalExitApproval,
+  
+  // STAGE 10: Gate Exit
+  processGateExit,
+  
+  // Helper endpoints
   getIncomingShipments,
   getIncomingShipmentById,
-  updateSecurityCount,
-  updateQCInspection,
-  updateLabAnalysis,
-  updateWeighbridge,
-  updateMDApproval,
-  updateOffloading,
+  getPreOffloadReport,
+  getFinalExitReport,
   deleteIncomingShipment,
   getIncomingStats
 } from '../controllers/incommingShipmentController.js';
@@ -18,37 +46,48 @@ import { isAdmin } from '../middlewares/authRoles.js';
 
 const router = express.Router();
 
-// Stats endpoint (must be before /:id routes)
+// ========== STATS & LISTS ==========
 router.get('/stats', authenticate, getIncomingStats);
-
-// Create new incoming shipment
-router.post('/', authenticate, createIncomingShipment);
-
-// Get all incoming shipments
 router.get('/', authenticate, getIncomingShipments);
-
-// Get single incoming shipment
 router.get('/:id', authenticate, getIncomingShipmentById);
 
-// Update security count
-router.patch('/:id/security-count', authenticate, updateSecurityCount);
+// ========== CONSOLIDATED REPORTS ==========
+router.get('/:id/pre-offload-report', authenticate, getPreOffloadReport);
+router.get('/:id/final-exit-report', authenticate, getFinalExitReport);
 
-// Update QC inspection
-router.patch('/:id/qc', authenticate, updateQCInspection);
+// ========== STAGE 1: GATE ENTRY ==========
+router.post('/', authenticate, createIncomingShipment);
 
-// Update lab analysis
-router.patch('/:id/lab', authenticate, updateLabAnalysis);
+// ========== STAGE 2: MD APPROVAL #1 (Gate Entry Approval) ==========
+router.patch('/:id/md-gate-approval', authenticate, isAdmin, updateMDGateApproval);
 
-// Update weighbridge
-router.patch('/:id/weighbridge', authenticate, updateWeighbridge);
+// ========== STAGE 3: QC INSPECTION ==========
+router.patch('/:id/qc-inspection', authenticate, updateQCInspection);
 
-// MD Approval (Admin only)
-router.patch('/:id/md-approval', authenticate, isAdmin, updateMDApproval);
+// ========== STAGE 4: LAB ANALYSIS ==========
+router.patch('/:id/lab-analysis', authenticate, updateLabAnalysis);
 
-// Update offloading
-router.patch('/:id/offloading', authenticate, updateOffloading);
+// ========== STAGE 5: WEIGHBRIDGE GROSS ==========
+router.patch('/:id/weighbridge-gross', authenticate, updateWeighbridgeGross);
 
-// Delete incoming shipment (Admin only)
+// ========== STAGE 6: MD APPROVAL #2 (Pre-Offload Approval) ==========
+router.patch('/:id/md-pre-offload-approval', authenticate, isAdmin, updateMDPreOffloadApproval);
+
+// ========== STAGE 7: OFFLOAD REPORTS (3 Departments) ==========
+router.patch('/:id/offload-qc-stockkeeper', authenticate, submitQCStockKeeperReport);
+router.patch('/:id/offload-warehouse', authenticate, submitWarehouseReport);
+router.patch('/:id/offload-security', authenticate, submitSecurityReport);
+
+// ========== STAGE 8: WEIGHBRIDGE TARE ==========
+router.patch('/:id/weighbridge-tare', authenticate, updateWeighbridgeTare);
+
+// ========== STAGE 9: MD APPROVAL #3 (Final Exit Approval) ==========
+router.patch('/:id/md-final-exit-approval', authenticate, isAdmin, updateMDFinalExitApproval);
+
+// ========== STAGE 10: GATE EXIT ==========
+router.patch('/:id/gate-exit', authenticate, processGateExit);
+
+// ========== DELETE ==========
 router.delete('/:id', authenticate, isAdmin, deleteIncomingShipment);
 
 export default router;

@@ -15,6 +15,7 @@ import qcRoute from "./routes/qcRoute.js"
 import labRoute from "./routes/labRoute.js"
 import adminApprovalRoute from "./routes/adminApprovalRoute.js"
 import offloadingRoute from "./routes/offloadingRoute.js"
+import companyInformationRoute from "./routes/companyInformationRoute.js"
 
 
 
@@ -49,6 +50,7 @@ app.use('/api/qc', qcRoute)
 app.use('/api/lab', labRoute)
 app.use('/api/admin-approval', adminApprovalRoute)
 app.use('/api/offloading', offloadingRoute)
+app.use('/api/company-info', companyInformationRoute)
 
 
 

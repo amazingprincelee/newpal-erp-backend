@@ -1,4 +1,4 @@
-// controllers/outgoingShipmentController.js
+// controllers/outgoingShipmentController.js - REFACTORED FOR NEW WORKFLOW
 import OutgoingShipment from '../models/outgoingShipment.js';
 
 // Generate unique shipment number
@@ -11,26 +11,21 @@ const generateShipmentNumber = async () => {
   return `OS-${year}-${number}`;
 };
 
-// Create new outgoing shipment
+// ========== STAGE 1: GATE ENTRY (Empty Truck) ==========
 export const createOutgoingShipment = async (req, res) => {
   try {
-    console.log('📦 Creating outgoing shipment');
-    console.log('Body:', req.body);
-
     const {
       customer,
       driverName,
       driverPhone,
       truckPlateNumber,
-      items,
+      productType,
+      quantityToLoad,
       destination,
-      deliveryNoteNumber,
-      waybillNumber,
       notes
     } = req.body;
 
-    // Validate required fields
-    if (!customer || !driverName || !driverPhone || !truckPlateNumber || !items || !destination) {
+    if (!customer || !driverName || !driverPhone || !truckPlateNumber || !productType || !quantityToLoad || !destination) {
       return res.status(400).json({
         success: false,
         message: 'Missing required fields'
@@ -39,47 +34,388 @@ export const createOutgoingShipment = async (req, res) => {
 
     const shipmentNumber = await generateShipmentNumber();
 
-    const shipmentData = {
+    const shipment = new OutgoingShipment({
       shipmentNumber,
-      releasedBy: req.user?.id || req.user?._id,
-      releasedAt: new Date(),
-      customer,
-      driverName,
-      driverPhone,
-      truckPlateNumber: truckPlateNumber.toUpperCase(),
-      items,
-      destination,
-      deliveryNoteNumber,
-      waybillNumber,
-      notes,
-      status: 'Pending MD Approval',
-      mdApproval: {
-        status: 'PENDING',
-        requestedAt: new Date()
-      }
-    };
+      gateEntry: {
+        enteredBy: req.user.id,
+        enteredAt: new Date(),
+        customer,
+        driverName,
+        driverPhone,
+        truckPlateNumber: truckPlateNumber.toUpperCase(),
+        productType,
+        quantityToLoad: Number(quantityToLoad),
+        destination,
+        notes
+      },
+      currentStatus: 'PENDING_MD_GATE_APPROVAL_OUT'
+    });
 
-    const shipment = new OutgoingShipment(shipmentData);
     await shipment.save();
+    await shipment.populate('gateEntry.customer', 'companyName contactPerson phone');
+    await shipment.populate('gateEntry.enteredBy', 'fullname email');
 
-    // Populate customer info
-    await shipment.populate('customer', 'companyName contactPerson phone');
-    await shipment.populate('releasedBy', 'name email');
-
-    console.log('✅ Outgoing shipment created:', shipment._id);
     res.status(201).json({
       success: true,
-      message: 'Outgoing shipment created and pending MD approval',
+      message: 'Empty truck gate entry created. Pending MD approval.',
       data: shipment
     });
   } catch (error) {
-    console.error('❌ Create outgoing shipment error:', error);
-    res.status(500).json({
-      success: false,
-      message: error.message || 'Failed to create outgoing shipment'
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
+
+// ========== STAGE 2: MD APPROVAL #1 (Gate Entry Approval) ==========
+export const updateMDGateApproval = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, notes } = req.body;
+
+    const shipment = await OutgoingShipment.findById(id);
+    if (!shipment) {
+      return res.status(404).json({ success: false, message: 'Shipment not found' });
+    }
+
+    if (shipment.currentStatus !== 'PENDING_MD_GATE_APPROVAL_OUT') {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Shipment must be pending gate approval' 
+      });
+    }
+
+    shipment.mdApprovals.gateApproval = {
+      status: status,
+      reviewedBy: req.user.id,
+      reviewedAt: new Date(),
+      notes
+    };
+
+    if (status === 'APPROVED') {
+      shipment.currentStatus = 'APPROVED_FOR_TARE_WEIGHT';
+    } else {
+      shipment.currentStatus = 'REJECTED_AT_GATE_OUT';
+    }
+
+    await shipment.save();
+    await shipment.populate('mdApprovals.gateApproval.reviewedBy', 'fullname email');
+
+    res.json({
+      success: true,
+      message: `Gate entry ${status.toLowerCase()}`,
+      data: shipment
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ========== STAGE 3: WEIGHBRIDGE TARE (Empty Truck) ==========
+export const updateWeighbridgeTare = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { tareWeight, notes } = req.body;
+
+    const shipment = await OutgoingShipment.findById(id);
+    if (!shipment) {
+      return res.status(404).json({ success: false, message: 'Shipment not found' });
+    }
+
+    if (shipment.currentStatus !== 'APPROVED_FOR_TARE_WEIGHT') {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Shipment must be approved for tare weight' 
+      });
+    }
+
+    shipment.weighbridge.tareWeight = Number(tareWeight);
+    shipment.weighbridge.tareWeighedBy = req.user.id;
+    shipment.weighbridge.tareWeighedAt = new Date();
+    shipment.weighbridge.notes = notes;
+
+    shipment.currentStatus = 'WEIGHBRIDGE_TARE_RECORDED';
+
+    await shipment.save();
+
+    // Auto-move to QC pre-loading
+    shipment.currentStatus = 'AT_QC_PRE_LOADING';
+    await shipment.save();
+
+    await shipment.populate('weighbridge.tareWeighedBy', 'fullname email');
+
+    res.json({
+      success: true,
+      message: 'Tare weight recorded. Truck sent to QC pre-loading.',
+      data: shipment
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ========== STAGE 4: QC PRE-LOADING INSPECTION ==========
+export const updateQCPreLoading = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const qcData = req.body;
+
+    const shipment = await OutgoingShipment.findById(id);
+    if (!shipment) {
+      return res.status(404).json({ success: false, message: 'Shipment not found' });
+    }
+
+    if (shipment.currentStatus !== 'AT_QC_PRE_LOADING') {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Shipment must be at QC pre-loading stage' 
+      });
+    }
+
+    shipment.qcPreLoading = {
+      ...qcData,
+      inspectedBy: req.user.id,
+      inspectedAt: new Date()
+    };
+
+    if (qcData.status === 'PASSED') {
+      shipment.currentStatus = 'QC_PASSED_FOR_LOADING';
+    } else {
+      shipment.currentStatus = 'QC_REJECTED_PRE_LOADING';
+    }
+
+    await shipment.save();
+    await shipment.populate('qcPreLoading.inspectedBy', 'fullname email');
+
+    res.json({
+      success: true,
+      message: 'QC pre-loading inspection completed',
+      data: shipment
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ========== STAGE 5: WAREHOUSE LOADING ==========
+export const submitWarehouseLoading = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const loadingData = req.body;
+
+    const shipment = await OutgoingShipment.findById(id);
+    if (!shipment) {
+      return res.status(404).json({ success: false, message: 'Shipment not found' });
+    }
+
+    if (shipment.currentStatus !== 'QC_PASSED_FOR_LOADING' && shipment.currentStatus !== 'LOADING_IN_PROGRESS') {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'QC must pass before loading' 
+      });
+    }
+
+    shipment.warehouseLoading = {
+      ...loadingData,
+      loadedBy: req.user.id,
+      completed: loadingData.completed || false
+    };
+
+    if (loadingData.completed) {
+      shipment.currentStatus = 'LOADING_COMPLETE';
+      shipment.warehouseLoading.loadingEndTime = new Date();
+    } else {
+      shipment.currentStatus = 'LOADING_IN_PROGRESS';
+      if (!shipment.warehouseLoading.loadingStartTime) {
+        shipment.warehouseLoading.loadingStartTime = new Date();
+      }
+    }
+
+    await shipment.save();
+
+    res.json({
+      success: true,
+      message: loadingData.completed ? 'Loading completed' : 'Loading in progress',
+      data: shipment
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ========== STAGE 5B: QC POST-LOADING VERIFICATION ==========
+export const updateQCPostLoading = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const qcData = req.body;
+
+    const shipment = await OutgoingShipment.findById(id);
+    if (!shipment) {
+      return res.status(404).json({ success: false, message: 'Shipment not found' });
+    }
+
+    if (shipment.currentStatus !== 'LOADING_COMPLETE') {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Loading must be complete before QC post-loading' 
+      });
+    }
+
+    shipment.qcPostLoading = {
+      ...qcData,
+      verifiedBy: req.user.id,
+      verifiedAt: new Date()
+    };
+
+    if (qcData.status === 'PASSED') {
+      shipment.currentStatus = 'QC_PASSED_OUT';
+    } else {
+      shipment.currentStatus = 'QC_REJECTED_OUT';
+    }
+
+    await shipment.save();
+    await shipment.populate('qcPostLoading.verifiedBy', 'fullname email');
+
+    res.json({
+      success: true,
+      message: 'QC post-loading verification completed',
+      data: shipment
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ========== STAGE 6: WEIGHBRIDGE GROSS (Full Truck) ==========
+export const updateWeighbridgeGross = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { grossWeight, notes, operatorSignature } = req.body;
+
+    const shipment = await OutgoingShipment.findById(id);
+    if (!shipment) {
+      return res.status(404).json({ success: false, message: 'Shipment not found' });
+    }
+
+    if (shipment.currentStatus !== 'QC_PASSED_OUT') {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'QC post-loading must pass before gross weighing' 
+      });
+    }
+
+    shipment.weighbridge.grossWeight = Number(grossWeight);
+    shipment.weighbridge.grossWeighedBy = req.user.id;
+    shipment.weighbridge.grossWeighedAt = new Date();
+    shipment.weighbridge.notes = notes;
+    shipment.weighbridge.operatorSignature = operatorSignature;
+
+    shipment.currentStatus = 'WEIGHBRIDGE_GROSS_RECORDED';
+
+    await shipment.save();
+
+    // Auto-move to pending MD approval #2
+    shipment.currentStatus = 'PENDING_MD_APPROVAL_OUT_2';
+    await shipment.save();
+
+    await shipment.populate('weighbridge.grossWeighedBy', 'fullname email');
+
+    res.json({
+      success: true,
+      message: 'Gross weight recorded. Pending MD final approval.',
+      data: shipment
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ========== STAGE 7: MD APPROVAL #2 (Final Exit Approval) ==========
+export const updateMDFinalExitApproval = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, notes } = req.body;
+
+    const shipment = await OutgoingShipment.findById(id);
+    if (!shipment) {
+      return res.status(404).json({ success: false, message: 'Shipment not found' });
+    }
+
+    if (shipment.currentStatus !== 'PENDING_MD_APPROVAL_OUT_2') {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Shipment must be pending final approval' 
+      });
+    }
+
+    shipment.mdApprovals.finalExitApproval = {
+      status: status,
+      reviewedBy: req.user.id,
+      reviewedAt: new Date(),
+      notes
+    };
+
+    if (status === 'APPROVED') {
+      shipment.currentStatus = 'APPROVED_FOR_EXIT_OUT';
+    } else {
+      shipment.currentStatus = 'REJECTED_AT_FINAL_OUT';
+    }
+
+    await shipment.save();
+    await shipment.populate('mdApprovals.finalExitApproval.reviewedBy', 'fullname email');
+
+    res.json({
+      success: true,
+      message: `Final exit ${status.toLowerCase()}`,
+      data: shipment
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ========== STAGE 8: GATE EXIT ==========
+export const processGateExit = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { mdApprovalVerified, weighbridgeTicketVerified, loadingTicketVerified, qcApprovalVerified, notes } = req.body;
+
+    const shipment = await OutgoingShipment.findById(id);
+    if (!shipment) {
+      return res.status(404).json({ success: false, message: 'Shipment not found' });
+    }
+
+    if (shipment.currentStatus !== 'APPROVED_FOR_EXIT_OUT') {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Shipment must be approved for exit' 
+      });
+    }
+
+    shipment.gateExit = {
+      exitedBy: req.user.id,
+      exitedAt: new Date(),
+      mdApprovalVerified,
+      weighbridgeTicketVerified,
+      loadingTicketVerified,
+      qcApprovalVerified,
+      notes
+    };
+
+    shipment.currentStatus = 'COMPLETED_OUTGOING';
+
+    await shipment.save();
+    await shipment.populate('gateExit.exitedBy', 'fullname email');
+
+    res.json({
+      success: true,
+      message: 'Truck exited. Outgoing shipment completed.',
+      data: shipment
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ========== HELPER ENDPOINTS ==========
 
 // Get all outgoing shipments
 export const getOutgoingShipments = async (req, res) => {
@@ -87,33 +423,33 @@ export const getOutgoingShipments = async (req, res) => {
     const { status, customer, limit = 50 } = req.query;
 
     const filter = {};
-    if (status) filter.status = status;
-    if (customer) filter.customer = customer;
+    if (status) filter.currentStatus = status;
+    if (customer) filter['gateEntry.customer'] = customer;
 
     const shipments = await OutgoingShipment.find(filter)
-      .populate('customer', 'companyName contactPerson phone')
-      .populate('releasedBy', 'name email')
-      .populate('mdApproval.approvedBy mdApproval.rejectedBy', 'name email')
-      .populate('gateOut.verifiedBy', 'name email')
+      .populate('gateEntry.customer', 'companyName contactPerson phone')
+      .populate('gateEntry.enteredBy', 'fullname email')
       .sort({ createdAt: -1 })
       .limit(parseInt(limit));
 
     res.json({ success: true, data: shipments });
   } catch (error) {
-    console.error('❌ Get outgoing shipments error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Get single outgoing shipment
+// Get single shipment
 export const getOutgoingShipmentById = async (req, res) => {
   try {
     const shipment = await OutgoingShipment.findById(req.params.id)
-      .populate('customer', 'companyName contactPerson phone email')
-      .populate('releasedBy', 'name email')
-      .populate('mdApproval.approvedBy mdApproval.rejectedBy', 'name email')
-      .populate('loadedBy', 'name email')
-      .populate('gateOut.verifiedBy', 'name email');
+      .populate('gateEntry.customer gateEntry.enteredBy')
+      .populate('qcPreLoading.inspectedBy')
+      .populate('warehouseLoading.loadedBy')
+      .populate('qcPostLoading.verifiedBy')
+      .populate('weighbridge.tareWeighedBy weighbridge.grossWeighedBy')
+      .populate('mdApprovals.gateApproval.reviewedBy')
+      .populate('mdApprovals.finalExitApproval.reviewedBy')
+      .populate('gateExit.exitedBy');
 
     if (!shipment) {
       return res.status(404).json({ success: false, message: 'Shipment not found' });
@@ -121,274 +457,75 @@ export const getOutgoingShipmentById = async (req, res) => {
 
     res.json({ success: true, data: shipment });
   } catch (error) {
-    console.error('❌ Get outgoing shipment error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// MD Approval
-export const updateMDApproval = async (req, res) => {
+// Get consolidated report for MD Approval #2
+export const getFinalExitReport = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, notes, rejectionReason } = req.body;
+    
+    const shipment = await OutgoingShipment.findById(id)
+      .populate('qcPreLoading.inspectedBy')
+      .populate('warehouseLoading.loadedBy')
+      .populate('qcPostLoading.verifiedBy')
+      .populate('weighbridge.tareWeighedBy weighbridge.grossWeighedBy');
 
-    const shipment = await OutgoingShipment.findById(id);
     if (!shipment) {
       return res.status(404).json({ success: false, message: 'Shipment not found' });
     }
 
-    if (status === 'APPROVED') {
-      shipment.mdApproval.status = 'APPROVED';
-      shipment.mdApproval.approvedBy = req.user?.id || req.user?._id;
-      shipment.mdApproval.approvedAt = new Date();
-      shipment.mdApproval.notes = notes;
-      shipment.status = 'MD Approved';
-    } else if (status === 'REJECTED') {
-      shipment.mdApproval.status = 'REJECTED';
-      shipment.mdApproval.rejectedBy = req.user?.id || req.user?._id;
-      shipment.mdApproval.rejectedAt = new Date();
-      shipment.mdApproval.rejectionReason = rejectionReason;
-      shipment.status = 'Draft';
-    }
-
-    await shipment.save();
-
-    res.json({
-      success: true,
-      message: `Shipment ${status.toLowerCase()} successfully`,
-      data: shipment
-    });
-  } catch (error) {
-    console.error('❌ Update MD approval error:', error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-// Start loading
-export const startLoading = async (req, res) => {
-  try {
-    const shipment = await OutgoingShipment.findById(req.params.id);
-    if (!shipment) {
-      return res.status(404).json({ success: false, message: 'Shipment not found' });
-    }
-
-    shipment.status = 'Loading';
-    shipment.loadingStartedAt = new Date();
-    shipment.loadedBy = req.user?.id || req.user?._id;
-
-    await shipment.save();
-
-    res.json({
-      success: true,
-      message: 'Loading started',
-      data: shipment
-    });
-  } catch (error) {
-    console.error('❌ Start loading error:', error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-// Complete loading
-export const completeLoading = async (req, res) => {
-  try {
-    const shipment = await OutgoingShipment.findById(req.params.id);
-    if (!shipment) {
-      return res.status(404).json({ success: false, message: 'Shipment not found' });
-    }
-
-    shipment.status = 'Loaded';
-    shipment.loadedAt = new Date();
-
-    await shipment.save();
-
-    res.json({
-      success: true,
-      message: 'Loading completed, ready for gate out verification',
-      data: shipment
-    });
-  } catch (error) {
-    console.error('❌ Complete loading error:', error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-// Gate out verification (Security counts bags)
-export const updateGateOutVerification = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { bagsCounted, truckCondition, sealNumber, securityNotes } = req.body;
-
-    const shipment = await OutgoingShipment.findById(id);
-    if (!shipment) {
-      return res.status(404).json({ success: false, message: 'Shipment not found' });
-    }
-
-    shipment.gateOut = {
-      verifiedBy: req.user?.id || req.user?._id,
-      verifiedAt: new Date(),
-      bagsCounted: Number(bagsCounted),
-      countMatch: Number(bagsCounted) === shipment.totalBags,
-      truckCondition,
-      sealNumber,
-      securityNotes
+    const report = {
+      shipmentNumber: shipment.shipmentNumber,
+      qcPreLoading: shipment.qcPreLoading,
+      warehouseLoading: shipment.warehouseLoading,
+      qcPostLoading: shipment.qcPostLoading,
+      weighbridge: shipment.weighbridge
     };
 
-    shipment.status = 'Gate Out Verification';
-    shipment.gateOutVerifiedAt = new Date();
-    shipment.gateOutVerifiedBy = req.user?.id || req.user?._id;
-
-    await shipment.save();
-
-    res.json({
-      success: true,
-      message: 'Gate out verification completed',
-      data: shipment
-    });
+    res.json({ success: true, data: report });
   } catch (error) {
-    console.error('❌ Gate out verification error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Gate out (Truck leaves)
-export const gateOut = async (req, res) => {
-  try {
-    const shipment = await OutgoingShipment.findById(req.params.id);
-    if (!shipment) {
-      return res.status(404).json({ success: false, message: 'Shipment not found' });
-    }
-
-    shipment.status = 'Gate Out';
-    shipment.gateOutAt = new Date();
-    shipment.gateOutBy = req.user?.id || req.user?._id;
-
-    await shipment.save();
-
-    res.json({
-      success: true,
-      message: 'Truck has left the premises',
-      data: shipment
-    });
-  } catch (error) {
-    console.error('❌ Gate out error:', error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-// Mark in transit
-export const markInTransit = async (req, res) => {
-  try {
-    const shipment = await OutgoingShipment.findById(req.params.id);
-    if (!shipment) {
-      return res.status(404).json({ success: false, message: 'Shipment not found' });
-    }
-
-    shipment.status = 'In Transit';
-    await shipment.save();
-
-    res.json({
-      success: true,
-      message: 'Shipment marked as in transit',
-      data: shipment
-    });
-  } catch (error) {
-    console.error('❌ Mark in transit error:', error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-// Mark delivered
-export const markDelivered = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { actualBagsReceived, issues, customerSignature } = req.body;
-
-    const shipment = await OutgoingShipment.findById(id);
-    if (!shipment) {
-      return res.status(404).json({ success: false, message: 'Shipment not found' });
-    }
-
-    shipment.status = actualBagsReceived < shipment.totalBags ? 'Short-Landed' : 'Delivered';
-    shipment.deliveredAt = new Date();
-    shipment.actualBagsReceived = Number(actualBagsReceived);
-    shipment.issues = issues;
-    shipment.customerSignature = customerSignature;
-
-    await shipment.save();
-
-    res.json({
-      success: true,
-      message: 'Shipment marked as delivered',
-      data: shipment
-    });
-  } catch (error) {
-    console.error('❌ Mark delivered error:', error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-// Delete outgoing shipment
+// Delete shipment
 export const deleteOutgoingShipment = async (req, res) => {
   try {
-    const shipment = await OutgoingShipment.findById(req.params.id);
-    if (!shipment) {
-      return res.status(404).json({ success: false, message: 'Shipment not found' });
-    }
-
     await OutgoingShipment.findByIdAndDelete(req.params.id);
-
-    res.json({
-      success: true,
-      message: 'Shipment deleted successfully'
-    });
+    res.json({ success: true, message: 'Shipment deleted' });
   } catch (error) {
-    console.error('❌ Delete shipment error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Get dashboard stats
+// Dashboard stats
 export const getOutgoingStats = async (req, res) => {
   try {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const [
-      totalToday,
-      pendingApproval,
-      approved,
-      loading,
-      loaded,
-      gateOutVerification,
-      inTransit,
-      delivered
-    ] = await Promise.all([
-      OutgoingShipment.countDocuments({ createdAt: { $gte: today } }),
-      OutgoingShipment.countDocuments({ status: 'Pending MD Approval' }),
-      OutgoingShipment.countDocuments({ status: 'MD Approved' }),
-      OutgoingShipment.countDocuments({ status: 'Loading' }),
-      OutgoingShipment.countDocuments({ status: 'Loaded' }),
-      OutgoingShipment.countDocuments({ status: 'Gate Out Verification' }),
-      OutgoingShipment.countDocuments({ status: 'In Transit' }),
-      OutgoingShipment.countDocuments({ status: 'Delivered', createdAt: { $gte: today } })
+    const stats = await Promise.all([
+      OutgoingShipment.countDocuments({ currentStatus: 'PENDING_MD_GATE_APPROVAL_OUT' }),
+      OutgoingShipment.countDocuments({ currentStatus: 'AT_QC_PRE_LOADING' }),
+      OutgoingShipment.countDocuments({ currentStatus: 'LOADING_IN_PROGRESS' }),
+      OutgoingShipment.countDocuments({ currentStatus: 'AT_QC_POST_LOADING' }),
+      OutgoingShipment.countDocuments({ currentStatus: 'PENDING_MD_APPROVAL_OUT_2' }),
+      OutgoingShipment.countDocuments({ currentStatus: 'APPROVED_FOR_EXIT_OUT' }),
+      OutgoingShipment.countDocuments({ currentStatus: 'COMPLETED_OUTGOING' })
     ]);
 
     res.json({
       success: true,
       data: {
-        totalToday,
-        pendingApproval,
-        approved,
-        loading,
-        loaded,
-        gateOutVerification,
-        inTransit,
-        delivered
+        pendingGateApproval: stats[0],
+        atQCPreLoading: stats[1],
+        loading: stats[2],
+        atQCPostLoading: stats[3],
+        pendingFinalApproval: stats[4],
+        approvedForExit: stats[5],
+        completed: stats[6]
       }
     });
   } catch (error) {
-    console.error('❌ Get outgoing stats error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };

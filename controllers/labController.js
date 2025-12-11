@@ -1,4 +1,4 @@
-// controllers/labController.js
+// controllers/labController.js - UPDATED TO MATCH NEW WORKFLOW
 import IncomingShipment from "../models/incomingShipment.js";
 import { upload } from "../config/cloudinary.js";
 
@@ -11,7 +11,7 @@ export const getSamplesPendingAnalysis = async (req, res) => {
     .populate('gateEntry.vendor', 'companyName contactPerson phone')
     .populate('gateEntry.enteredBy', 'fullname username email')
     .populate('qualityControl.inspectedBy', 'fullname username email')
-    .sort({ 'qualityControl.inspectedAt': 1 });
+    .sort({ 'qualityControl.inspectedAt': 1 }); // Oldest first (FIFO)
 
     console.log(`✅ Found ${samples.length} samples pending lab analysis`);
 
@@ -38,7 +38,8 @@ export const getSampleForAnalysis = async (req, res) => {
     const sample = await IncomingShipment.findById(id)
       .populate('gateEntry.vendor', 'companyName contactPerson phone')
       .populate('gateEntry.enteredBy', 'fullname username email')
-      .populate('qualityControl.inspectedBy', 'fullname username email');
+      .populate('qualityControl.inspectedBy', 'fullname username email')
+      .populate('mdApprovals.gateApproval.reviewedBy', 'fullname username email');
 
     if (!sample) {
       return res.status(404).json({
@@ -183,11 +184,11 @@ export const submitMicrobiologicalAnalysis = async (req, res) => {
       status: isPassed ? 'PASSED' : 'FAILED'
     };
 
-    // Update status based on result
+    // Update status based on result - STAGE 4 outcomes
     if (isPassed) {
-      shipment.currentStatus = 'AT_WEIGHBRIDGE';
+      shipment.currentStatus = 'LAB_PASSED'; // Will proceed to weighbridge gross (Stage 5)
     } else {
-      shipment.currentStatus = 'REJECTED';
+      shipment.currentStatus = 'LAB_REJECTED'; // Process terminates
     }
 
     await shipment.save();
@@ -203,8 +204,8 @@ export const submitMicrobiologicalAnalysis = async (req, res) => {
     res.status(200).json({
       success: true,
       message: isPassed 
-        ? "Lab analysis completed. Sample passed and sent to weighbridge."
-        : "Lab analysis completed. Sample failed quality standards.",
+        ? "Lab analysis completed. Sample passed and ready for weighbridge (gross weight)."
+        : "Lab analysis completed. Sample failed quality standards and has been rejected.",
       data: updatedShipment
     });
   } catch (error) {
@@ -273,11 +274,11 @@ export const submitChemicalAnalysis = async (req, res) => {
       status: isPassed ? 'PASSED' : 'FAILED'
     };
 
-    // Update status based on result
+    // Update status based on result - STAGE 4 outcomes
     if (isPassed) {
-      shipment.currentStatus = 'AT_WEIGHBRIDGE';
+      shipment.currentStatus = 'LAB_PASSED'; // Will proceed to weighbridge gross (Stage 5)
     } else {
-      shipment.currentStatus = 'REJECTED';
+      shipment.currentStatus = 'LAB_REJECTED'; // Process terminates
     }
 
     await shipment.save();
@@ -293,8 +294,8 @@ export const submitChemicalAnalysis = async (req, res) => {
     res.status(200).json({
       success: true,
       message: isPassed 
-        ? "Lab analysis completed. Sample passed and sent to weighbridge."
-        : "Lab analysis completed. Sample failed quality standards.",
+        ? "Lab analysis completed. Sample passed and ready for weighbridge (gross weight)."
+        : "Lab analysis completed. Sample failed quality standards and has been rejected.",
       data: updatedShipment
     });
   } catch (error) {
