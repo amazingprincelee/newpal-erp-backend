@@ -1,6 +1,7 @@
 // controllers/adminApprovalController.js
 import IncomingShipment from '../models/incomingShipment.js';
 import OutgoingShipment from '../models/outgoingShipment.js';
+import { createNotification } from '../utils/notificationHelper.js';
 
 // ==================== INCOMING SHIPMENTS ====================
 
@@ -108,8 +109,16 @@ export const approveIncomingShipment = async (req, res) => {
     
     // Update current status
     shipment.currentStatus = 'APPROVED';
+    
 
     await shipment.save();
+
+  await createNotification({
+      userId: req.user._id,
+      title: 'You Approved a Shipment',
+      message: `You approved incoming shipment ${shipment.shipmentNumber} for QC.`,
+      type: 'info',
+    });
 
     // Populate for response
     await shipment.populate('adminApproval.approvedBy', 'fullname username email');
@@ -171,6 +180,18 @@ export const rejectIncomingShipment = async (req, res) => {
     shipment.currentStatus = 'REJECTED';
 
     await shipment.save();
+
+    // Notify Gate Security that truck must leave
+    const gateUsers = await User.find({ role: 'gate-security' });
+    for (const user of gateUsers) {
+      await createNotification({
+        userId: user._id,
+        title: 'Rejected Truck at Gate',
+        message: `Shipment ${shipment.shipmentNumber} was rejected by MD. Please send truck away.`,
+        type: 'rejection',
+        link: `/gate/entry`,
+      });
+    }
 
     // Populate for response
     await shipment.populate('adminApproval.rejectedBy', 'fullname username email');
@@ -294,6 +315,18 @@ export const approveOutgoingShipment = async (req, res) => {
     shipment.status = 'Pending MD Approval'; // Will be auto-updated to 'MD Approved' by pre-save hook
 
     await shipment.save();
+
+    // Notify Warehouse/Loading team
+const warehouseUsers = await User.find({ role: 'inventory' });
+for (const user of warehouseUsers) {
+  await createNotification({
+    userId: user._id,
+    title: 'Truck Ready for Loading',
+    message: `Outgoing shipment to ${shipment.customer.companyName} has been approved.`,
+    type: 'approval',
+    link: `/loading/pending`,
+  });
+}
 
     // Populate for response
     await shipment.populate('mdApproval.approvedBy', 'fullname username email');
